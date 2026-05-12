@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<requirement>
+    <task_type>multi_payload_detection</task_type>
+
+    <payload_types>
+        <type>SAR</type>
+        <type>OPTICAL</type>
+        <type>ELINT</type>
+    </payload_types>
+
+    <target_classes>
+        <class>aircraft</class>
+        <class>ship</class>
+        <class>vehicle</class>
+    </target_classes>
+
+    <target_region>
+        <lon>120.1</lon>
+        <lat>30.2</lat>
+        <radius_km>20</radius_km>
+    </target_region>
+
+    <tile_size>1k*1k</tile_size>
+
+    <output_requirements>
+        <format>json</format>
+        <need_confidence>true</need_confidence>
+        <need_suggestion>true</need_suggestion>
+    </output_requirements>
+
+    <constraints>
+        <priority>high</priority>
+        <need_geo_correction>true</need_geo_correction>
+    </constraints>
+</requirement>

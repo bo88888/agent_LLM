@@ -1,0 +1,25 @@
+# Python 字节码/缓存文件（核心：忽略所有__pycache__目录）
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE 配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 输出文件（保留目录结构，忽略具体报告）
+outputs/*.json
+!outputs/.gitkeep
+
+# 临时文件
+*.log
+*.tmp
+.env
