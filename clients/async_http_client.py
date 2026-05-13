@@ -15,8 +15,6 @@ class AsyncHTTPClient:
     """
 
     def __init__(self, timeout: int = 60):
-        # 单次 HTTP 调用超时时间，单位是秒。
-        # 如果算法服务耗时较长，需要适当调大该值。
         self.timeout = timeout
 
     async def post_mcp(self, url: str, request: MCPRequest) -> MCPResponse:
@@ -40,12 +38,7 @@ class AsyncHTTPClient:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             # 向算法服务的 /infer 接口发送 JSON。
             resp = await client.post(url, json=payload)
-
-            # 如果 HTTP 状态码不是 2xx，这里会抛出异常。
-            # SchedulerCenter 会捕获到这个异常并进入重试/失败逻辑。
             resp.raise_for_status()
-
-            # 约定服务返回 JSON 格式的 MCPResponse 字段。
             data = resp.json()
 
         # 将服务返回的普通 dict 转为项目内部使用的 MCPResponse 数据对象。

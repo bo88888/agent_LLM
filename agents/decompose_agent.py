@@ -20,10 +20,5 @@ class DecomposeAgent:
         # 检测任务，例如 SAR 船舶检测、光学车辆检测、ELINT 检测。
         detection_tasks = build_detection_tasks(payloads, targets)
 
-        # 后处理任务，例如虚警过滤、融合、报告生成。
-        post_tasks = build_postprocess_tasks(detection_tasks)
-
-        # 按阶段合并为完整任务列表。
-        # 真正执行顺序不是简单按列表顺序，而是由 SchedulerCenter 根据 dependencies 判断。
-        context.subtasks = preprocess_tasks + detection_tasks + post_tasks
+        context.subtasks = preprocess_tasks + detection_tasks
         return context

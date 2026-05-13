@@ -1,35 +1,62 @@
 from core.schema import ExecutionContext
-
+from services.postprocess_service.processor import build_final_report
 
 class ReportAgent:
-    """最终报告整理智能体。
+    """最终报告整理智能体（本地生成报告并评估系统质量）。"""
+    def _assess_quality(self, context: ExecutionContext, threshold: float = 0.75) -> dict:
+        """内部方法：对网络调度的执行结果做质量评估"""
+        issues = []
+        task_summary = []
 
-    report_service 会生成业务报告内容，对应子任务 R1。
-    本 agent 负责把 R1 的结果提取到 context.final_report，
-    并把质量评估结果 execution_status 附加进去。
-    """
+        for task in context.subtasks:
+            task_summary.append({
+                "subtask_id": task.subtask_id,
+                "name": task.name,
+                "tool_name": task.tool_name,
+                "status": task.status.value,
+                "retry_count": task.retry_count,
+                "dependencies": task.dependencies,
+                "message": context.metadata.get(f"error_{task.subtask_id}")
+                or context.metadata.get(f"last_error_{task.subtask_id}")
+                or context.metadata.get(f"blocked_{task.subtask_id}", {}).get("reason", ""),
+            })
+
+            if task.status.value == "FAILED":
+                issues.append(f"{task.subtask_id} failed")
+            elif task.status.value == "BLOCKED":
+                blocked_info = context.metadata.get(f"blocked_{task.subtask_id}", {})
+                deps = ",".join(blocked_info.get("dependencies", []))
+                issues.append(f"{task.subtask_id} blocked by dependency: {deps}")
+
+        for subtask_id, result in context.tool_results.items():
+            if not result.success and f"{subtask_id} failed" not in issues:
+                issues.append(f"{subtask_id} failed")
+            elif result.confidence < threshold:
+                issues.append(f"{subtask_id} low confidence: {result.confidence:.2f}")
+
+        return {
+            "pass": len(issues) == 0,
+            "issues": issues,
+            "task_summary": task_summary,
+        }
 
     def run(self, context: ExecutionContext) -> ExecutionContext:
-        # R1 是 router.py 中定义的报告生成任务。
-        result = context.tool_results.get("R1")
+        fused_targets = context.metadata.get("fused_targets", [])
+        region = context.parsed_requirement.get("target_region", {})
+        task_id = context.request.task_id
 
-        if result and result.success:
-            # report_service 的标准输出是 {"final_report": {...}}。
-            # 如果没有 final_report 字段，则退而使用整个 output。
-            context.final_report = result.output.get("final_report", result.output)
-        else:
-            # 如果报告服务没有成功执行，生成一个失败报告，避免最终输出为空。
-            context.final_report = {
-                "task_id": context.request.task_id,
-                "status": "FAILED",
-                "message": "Report generation did not complete.",
-            }
+        # 1. 调用本地服务生成业务报告
+        report_data = build_final_report(fused_targets, task_id, region)
 
-        # 把质量评估结果附加到最终报告中。
-        # assess_quality 在 main.py 中执行，会写入 context.quality_report。
-        context.final_report["execution_status"] = {
+        quality_report = self._assess_quality(context)
+        context.quality_report = quality_report
+
+        # 2. 附加调度框架的质量评估状态
+        report_data["execution_status"] = {
             "pass": context.quality_report.get("pass", False),
             "issues": context.quality_report.get("issues", []),
             "tasks": context.quality_report.get("task_summary", []),
         }
+
+        context.final_report = report_data
         return context

@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-
 from agents.decompose_agent import DecomposeAgent
 from agents.input_agent import InputAgent
 from agents.invoker_agent import InvokerAgent
@@ -31,57 +30,6 @@ def build_registry() -> ToolRegistry:
     for tool_name, service_url in TOOL_SERVICE_MAP.items():
         registry.register(tool_name, service_url)
     return registry
-
-
-def assess_quality(context: ExecutionContext, threshold: float):
-    """对整个执行结果做简单质量评估。
-
-    当前评估逻辑包括：
-    - 子任务是否失败。
-    - 子任务是否被依赖阻塞。
-    - 工具服务返回的 confidence 是否低于阈值。
-    """
-    issues = []
-    task_summary = []
-
-    for task in context.subtasks:
-        # 为最终报告整理每个子任务的执行摘要。
-        task_summary.append(
-            {
-                "subtask_id": task.subtask_id,
-                "name": task.name,
-                "tool_name": task.tool_name,
-                "status": task.status.value,
-                "retry_count": task.retry_count,
-                "dependencies": task.dependencies,
-                "message": context.metadata.get(f"error_{task.subtask_id}")
-                or context.metadata.get(f"last_error_{task.subtask_id}")
-                or context.metadata.get(f"blocked_{task.subtask_id}", {}).get("reason", ""),
-            }
-        )
-
-        # 检查任务级别的失败或阻塞。
-        if task.status.value == "FAILED":
-            issues.append(f"{task.subtask_id} failed")
-        elif task.status.value == "BLOCKED":
-            blocked_info = context.metadata.get(f"blocked_{task.subtask_id}", {})
-            deps = ",".join(blocked_info.get("dependencies", []))
-            issues.append(f"{task.subtask_id} blocked by dependency: {deps}")
-
-    # 检查工具结果级别的 success 和 confidence。
-    for subtask_id, result in context.tool_results.items():
-        if not result.success and f"{subtask_id} failed" not in issues:
-            issues.append(f"{subtask_id} failed")
-        elif result.confidence < threshold:
-            issues.append(f"{subtask_id} low confidence: {result.confidence:.2f}")
-
-    # 写入上下文，后续 ReportAgent 会把它合并进 final_report。
-    context.quality_report = {
-        "pass": len(issues) == 0,
-        "issues": issues,
-        "task_summary": task_summary,
-    }
-
 
 def main():
     """主流程入口。
@@ -129,10 +77,7 @@ def main():
     # 7. 后处理摘要：统计过滤结果和融合结果数量。
     context = PostprocessAgent().run(context)
 
-    # 8. 质量评估：检查失败、阻塞和低置信度任务。
-    assess_quality(context, QUALITY_THRESHOLD)
-
-    # 9. 最终报告整理：提取 R1 报告结果，并附加 execution_status。
+    # 9. 最终报告整理：生成报告和质量评估（检查失败、阻塞和低置信度任务。）。
     context = ReportAgent().run(context)
 
     # 10. 将最终报告写入文件。

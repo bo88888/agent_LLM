@@ -2,7 +2,22 @@
 
 本项目是一个“多载荷目标检测任务调度器”示例工程。它接收任务需求，将任务拆解成多个子任务，通过 MCP 风格的 HTTP 请求调用工具服务，完成预处理、目标检测、虚警过滤、QB 融合和结构化报告生成。
 
-当前默认使用 `mock_all_service` 跑通 demo：所有工具服务都映射到 `http://127.0.0.1:8101/infer`。如果要调用独立 Docker 服务，需要修改 `config.py` 中的 `TOOL_SERVICE_MAP`。
+main.py
+  │
+  ├─ InputAgent          → 检查输入
+  ├─ UnderstandingAgent → 读 requirement.json
+  ├─ DecomposeAgent      → 拆子任务
+  ├─ PlanningAgent       → 建 DAG
+  ├─ SchedulerCenter     → 调度执行
+  │    └─ InvokerAgent
+  │         └─ MCPWrapper
+  │              └─ HTTP → services/*_service
+  │
+  ├─ PostprocessAgent    → 统计 / 融合
+  ├─ Quality Assessment  → 失败 / 阻塞 / 置信度
+  └─ ReportAgent         → final_report.json
+
+
 
 ## 输入
 
