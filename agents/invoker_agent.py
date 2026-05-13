@@ -25,9 +25,6 @@ class InvokerAgent:
             "optical_ship_service": ["detections"],
             "optical_vehicle_service": ["detections"],
             "elint_detection_service": ["detections"],
-            "false_alarm_filter_service": ["filtered_detections", "removed_false_alarms"],
-            "qb_fusion_service": ["fused_targets"],
-            "report_service": ["final_report"],
         }
         return schema_map.get(tool_name, [])
 
