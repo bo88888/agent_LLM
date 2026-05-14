@@ -6,8 +6,6 @@ app = FastAPI()
 def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
     """提取目标区域参数，兼容多种输入格式。"""
     input_data = payload.get("input_data", {})
-    
-    # 兼容处理：优先取 parsed_requirement，其次取 xml_config
     parsed = input_data.get("parsed_requirement")
     if not parsed:
         parsed = input_data.get("xml_config", {})
@@ -17,153 +15,90 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
         {"lon": 120.1, "lat": 30.2, "radius_km": 20}
     )
 
+def run_local_ai_model(tool_name: str, target_name: str, params: dict) -> dict:
+    """
+    在这里调用你 Docker 内部封装好的真实 AI 模型！
+    把提取出的切片/底图路径传给模型进行推理。
+    """
+    mode = params.get("mode", "base_map")
+    
+    # ---------------------------------------------------------
+    # 
+    # if mode == "slice":
+    #     base_img = params.get("basePath")
+    #     slice_img = params.get("pointPath")
+    #     # 调用本地模型预测切片
+    #     result = my_pytorch_model.predict_slice(base_img, slice_img, target=target_name)
+    # else:
+    #     full_img = params.get("tiff_path")
+    #     # 调用本地模型预测全图
+    #     result = my_pytorch_model.predict_full(full_img, target=target_name)
+    # 
+    # return result # 直接返回算法算出来的标准大字典
+    # ---------------------------------------------------------
+
+    # 下面是模拟模型根据 params 算出的结果：
+    lon = float(params.get("lon", 120.1))
+    lat = float(params.get("lat", 30.2))
+    
+    offset_lon = random.uniform(-0.005, 0.005)
+    offset_lat = random.uniform(-0.005, 0.005)
+    center_lon = lon + offset_lon
+    center_lat = lat + offset_lat
+    
+    return {
+        "code": 200,
+        "msg": f"success (processed in {mode} mode)",
+        "data": [
+            {
+                "targetName": target_name,
+                
+                # 像素坐标百分比
+                "leftTopX": 0.15, "leftTopY": 0.15,
+                "leftBotX": 0.15, "leftBotY": 0.85,
+                "rightTopX": 0.85, "rightTopY": 0.15,
+                "rightBotX": 0.85, "rightBotY": 0.85,
+                "center_x": 0.5, "center_y": 0.5,
+                
+                # 地理经纬度信息
+                "leftTopLon": center_lon - 0.001, "leftTopLat": center_lat + 0.001,
+                "leftBotLon": center_lon - 0.001, "leftBotLat": center_lat - 0.001,
+                "rightTopLon": center_lon + 0.001, "rightTopYLat": center_lat + 0.001,
+                "rightBotXLon": center_lon + 0.001, "rightBotYLat": center_lat - 0.001,
+                "center_Lon": center_lon, "center_Lat": center_lat,
+                
+                "algorithmSource": tool_name,
+                "score": round(random.uniform(0.88, 0.98), 2)
+            }
+        ]
+    }
+
+
+def build_mcp_response(subtask_id: str, tool_name: str, algo_response: dict) -> dict:
+    # 直接提取目标列表，如果没有则默认为空列表
+    detections = algo_response.get("data", [])
+    return {
+        "subtask_id": subtask_id,
+        "tool_name": tool_name,
+        "success": algo_response.get("code") == 200,
+        "output": {"detections": detections}, 
+        "confidence": detections[0].get("score", 0.90) if detections else 0.90,
+        "message": algo_response.get("msg") or f"{tool_name} 处理完成"
+    }
+
+
 @app.post("/infer")
 def infer(payload: Dict[str, Any]):
     tool_name = payload.get("tool_name", "")
     subtask_id = payload.get("subtask_id", "")
-    
-    # 提取区域共有字段
-    region = get_region(payload)
-    lon = region.get("lon")
-    lat = region.get("lat")
-    radius = region.get("radius_km")
+    params = payload.get("parameters", {})
 
-    # ==========================================
-    # 1. SAR 目标检测服务
-    # ==========================================
-    if tool_name == "sar_aircraft_service":
-        # 检查前置任务 P3 (几何校正) 结果
-        p3_output = payload.get("input_data", {}).get("previous_results", {}).get("P3", {})
-        if not p3_output.get("geo_corrected_path"):
-            return {
-                "subtask_id": subtask_id,
-                "tool_name": tool_name,
-                "success": False,
-                "output": {},
-                "confidence": 0.0,
-                "message": "错误：缺少前置任务 P3 图像！"
-            }
-            
-        detection = {
-            "id": "sar_air_001",
-            "category": "aircraft",
-            "source": "SAR_AIRCRAFT",
-            "location": [lon, lat],
-            "search_radius_km": radius,
-            "score": 0.91,
-            "mode": "sar"
-        }
-        return {
-            "subtask_id": subtask_id,
-            "tool_name": tool_name,
-            "success": True,
-            "output": {"detections": [detection]},
-            "confidence": 0.91,
-            "message": "SAR 飞机检测完成"
-        }
-
-    elif tool_name == "sar_ship_service":
-        detection = {
-            "id": "sar_ship_001",
-            "category": "ship",
-            "source": "SAR_SHIP",
-            "location": [lon, lat],
-            "search_radius_km": radius,
-            "score": 0.92,
-            "mode": "sar"
-        }
-        return {
-            "subtask_id": subtask_id,
-            "tool_name": tool_name,
-            "success": True,
-            "output": {"detections": [detection]},
-            "confidence": 0.92,
-            "message": "SAR 舰船检测完成"
-        }
-
-    elif tool_name == "sar_vehicle_service":
-        detection = {
-            "id": "sar_veh_001",
-            "category": "vehicle",
-            "source": "SAR_VEHICLE",
-            "location": [lon, lat],
-            "search_radius_km": radius,
-            "score": 0.89,
-            "mode": "sar"
-        }
-        return {
-            "subtask_id": subtask_id,
-            "tool_name": tool_name,
-            "success": True,
-            "output": {"detections": [detection]},
-            "confidence": 0.89,
-            "message": "SAR 车辆检测完成"
-        }
-
-    # ==========================================
-    # 2. 光学 目标检测服务
-    # ==========================================
-    elif tool_name == "optical_aircraft_service":
-        detection = {
-            "id": "opt_air_001",
-            "category": "aircraft",
-            "source": "OPTICAL_AIRCRAFT",
-            "location": [lon, lat],
-            "search_radius_km": radius,
-            "score": 0.90,
-            "mode": "optical"
-        }
-        return {
-            "subtask_id": subtask_id,
-            "tool_name": tool_name,
-            "success": True,
-            "output": {"detections": [detection]},
-            "confidence": 0.90,
-            "message": "光学飞机检测完成"
-        }
-
-    elif tool_name == "optical_ship_service":
-        detection = {
-            "id": "opt_ship_001",
-            "category": "ship",
-            "source": "OPTICAL_SHIP",
-            "location": [lon, lat],
-            "search_radius_km": radius,
-            "score": 0.90,
-            "mode": "optical"
-        }
-        return {
-            "subtask_id": subtask_id,
-            "tool_name": tool_name,
-            "success": True,
-            "output": {"detections": [detection]},
-            "confidence": 0.90,
-            "message": "光学舰船检测完成"
-        }
-
-    elif tool_name == "optical_vehicle_service":
-        detection = {
-            "id": "opt_veh_001",
-            "category": "vehicle",
-            "source": "OPTICAL_VEHICLE",
-            "location": [lon, lat],
-            "search_radius_km": radius,
-            "score": 0.88,
-            "mode": "optical"
-        }
-        return {
-            "subtask_id": subtask_id,
-            "tool_name": tool_name,
-            "success": True,
-            "output": {"detections": [detection]},
-            "confidence": 0.88,
-            "message": "光学车辆检测完成"
-        }
-
-    # ==========================================
-    # 3. 异常兜底
-    # ==========================================
-    return {
-        "success": False, 
-        "message": f"Unknown tool_name: {tool_name}"
+    valid_tools = {
+        "sar_aircraft_service", "sar_ship_service", "sar_vehicle_service",
+        "optical_aircraft_service", "optical_ship_service", "optical_vehicle_service"
     }
+    target_name = tool_name.split("_")[1]
+    
+    algo_response = call_specific_algorithm_docker(tool_name, target_name, params)
+    
+    return build_mcp_response(subtask_id, tool_name, algo_response)
