@@ -2,6 +2,17 @@
 <requirement>
     <task_type>multi_payload_detection</task_type>
 
+    <detection_mode>slice</detection_mode>
+
+    <slice_inputs>
+        <basePath>data/sample_packet/base_map.tif</basePath>
+        <pointPath>data/sample_packet/slice_001.tif</pointPath>
+        <lon>120.11</lon> 
+        <lat>30.12</lat>
+        <height>512</height>
+        <width>512</width>
+    </slice_inputs>
+
     <payload_types>
         <type>SAR</type>
         <type>OPTICAL</type>

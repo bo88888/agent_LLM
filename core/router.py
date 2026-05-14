@@ -1,9 +1,8 @@
 from typing import List
-
 from core.schema import SubTask
 
 
-def build_preprocess_tasks(payload_types: List[str]) -> List[SubTask]:
+def build_preprocess_tasks(req: dict) -> List[SubTask]:
     """根据载荷类型生成预处理阶段任务。
 
     router.py 的职责是“生成任务图”，不负责执行任务。
@@ -15,6 +14,15 @@ def build_preprocess_tasks(payload_types: List[str]) -> List[SubTask]:
     - parameters: 调用服务时额外传入的参数。
     """
     tasks: List[SubTask] = []
+    # 1. 提取需求数据
+    payload_types = req.get("payload_types", [])
+    mode = req.get("detection_mode", "base_map")
+    
+    # 2. 核心：根据识别模式构造专属参数字典
+    if mode == "base_map":
+        task_params = {"mode": "base_map", "tiff_path": req.get("tiff_path", "")}
+    else:
+        task_params = {"mode": "slice", **req.get("slice_inputs", {})}
 
     # 如果任务需求里包含 SAR 载荷，则添加 SAR 去噪任务。
     # 该任务没有依赖，可以在调度开始后立即执行。
@@ -24,6 +32,7 @@ def build_preprocess_tasks(payload_types: List[str]) -> List[SubTask]:
                 subtask_id="P1",
                 name="SAR denoise",
                 tool_name="sar_denoise_service",
+                parameters=task_params
             )
         )
 
@@ -35,6 +44,7 @@ def build_preprocess_tasks(payload_types: List[str]) -> List[SubTask]:
                 subtask_id="P2",
                 name="Optical enhancement",
                 tool_name="optical_enhance_service",
+                parameters=task_params
             )
         )
 
@@ -42,20 +52,22 @@ def build_preprocess_tasks(payload_types: List[str]) -> List[SubTask]:
     # 如果 P1/P2 中至少有一个存在，就添加 P3，并让 P3 依赖所有预处理任务。
     geo_deps = [t.subtask_id for t in tasks]
     if geo_deps:
+        p3_params = {"target_resolution": "2m", "source_resolution": "200m"}
+        p3_params.update(task_params)
         tasks.append(
             SubTask(
                 subtask_id="P3",
                 name="Geo correction",
                 tool_name="geo_correction_service",
                 dependencies=geo_deps,
-                parameters={"target_resolution": "2m", "source_resolution": "200m"},
+                parameters=p3_params,
             )
         )
 
     return tasks
 
 
-def build_detection_tasks(payload_types: List[str], target_classes: List[str]) -> List[SubTask]:
+def build_detection_tasks(req: dict) -> List[SubTask]:
     """根据载荷类型和目标类型生成检测阶段任务。
 
     例如：
@@ -63,26 +75,33 @@ def build_detection_tasks(payload_types: List[str], target_classes: List[str]) -
     - payload_types 包含 OPTICAL，target_classes 包含 ship，则生成光学船舶检测 D5。
     """
     tasks: List[SubTask] = []
+    # 1. 提取需求数据
+    payload_types = req.get("payload_types", [])
+    target_classes = req.get("target_classes", [])
+    mode = req.get("detection_mode", "base_map")
+    # 2. 根据识别模式构造专属参数字典
+    if mode == "base_map":
+        task_params = {"mode": "base_map", "tiff_path": req.get("tiff_path", "")}
+    else:
+        task_params = {"mode": "slice", **req.get("slice_inputs", {})}
 
-    # SAR/光学检测通常需要先完成几何校正，因此依赖 P3。
-    # 如果任务里没有 SAR/OPTICAL，说明没有几何校正需求，依赖为空。
     geo_dep = ["P3"] if any(p in payload_types for p in ["SAR", "OPTICAL"]) else []
 
     # SAR 目标检测任务。
     if "SAR" in payload_types and "aircraft" in target_classes:
-        tasks.append(SubTask("D1", "SAR aircraft detection", "sar_aircraft_service", dependencies=geo_dep))
+        tasks.append(SubTask("D1", "SAR aircraft detection", "sar_aircraft_service", dependencies=geo_dep, parameters=task_params))
     if "SAR" in payload_types and "ship" in target_classes:
-        tasks.append(SubTask("D2", "SAR ship detection", "sar_ship_service", dependencies=geo_dep))
+        tasks.append(SubTask("D2", "SAR ship detection", "sar_ship_service", dependencies=geo_dep, parameters=task_params))
     if "SAR" in payload_types and "vehicle" in target_classes:
-        tasks.append(SubTask("D3", "SAR vehicle detection", "sar_vehicle_service", dependencies=geo_dep))
+        tasks.append(SubTask("D3", "SAR vehicle detection", "sar_vehicle_service", dependencies=geo_dep, parameters=task_params))
 
     # 光学目标检测任务。
     if "OPTICAL" in payload_types and "aircraft" in target_classes:
-        tasks.append(SubTask("D4", "Optical aircraft detection", "optical_aircraft_service", dependencies=geo_dep))
+        tasks.append(SubTask("D4", "Optical aircraft detection", "optical_aircraft_service", dependencies=geo_dep, parameters=task_params))
     if "OPTICAL" in payload_types and "ship" in target_classes:
-        tasks.append(SubTask("D5", "Optical ship detection", "optical_ship_service", dependencies=geo_dep))
+        tasks.append(SubTask("D5", "Optical ship detection", "optical_ship_service", dependencies=geo_dep, parameters=task_params))
     if "OPTICAL" in payload_types and "vehicle" in target_classes:
-        tasks.append(SubTask("D6", "Optical vehicle detection", "optical_vehicle_service", dependencies=geo_dep))
+        tasks.append(SubTask("D6", "Optical vehicle detection", "optical_vehicle_service", dependencies=geo_dep, parameters=task_params))
 
     # ELINT 检测目前不依赖几何校正。
     # 因此它可以和预处理阶段任务并行执行。

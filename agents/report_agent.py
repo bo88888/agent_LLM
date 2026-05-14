@@ -44,10 +44,8 @@ class ReportAgent:
         fused_targets = context.metadata.get("fused_targets", [])
         region = context.parsed_requirement.get("target_region", {})
         task_id = context.request.task_id
-
-        # 1. 调用本地服务生成业务报告
-        report_data = build_final_report(fused_targets, task_id, region)
-
+        mode = context.parsed_requirement.get("detection_mode", "base_map")
+        report_data = build_final_report(fused_targets, task_id, region, mode)
         quality_report = self._assess_quality(context)
         context.quality_report = quality_report
 

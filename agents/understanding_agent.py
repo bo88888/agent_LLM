@@ -19,7 +19,6 @@ class UnderstandingAgent:
     """需求理解智能体。
     解析 XML 需求文件并写入 context.parsed_requirement。
     """
-
     def run(self, context: ExecutionContext) -> ExecutionContext:
         tree = ET.parse(context.request.requirement_xml_path)
         root = tree.getroot()
@@ -28,8 +27,24 @@ class UnderstandingAgent:
         payload_types = [t.text for t in root.findall('payload_types/type')]
         target_classes = [c.text for c in root.findall('target_classes/class')]
 
-        # 2. 组装字典
+        # 2. 提取识别模式与切片专属参数
+        mode = root.findtext('detection_mode', 'base_map') 
+        slice_inputs = {}
+        if mode == 'slice':
+            slice_inputs = {
+                "basePath": root.findtext('slice_inputs/basePath'),
+                "pointPath": root.findtext('slice_inputs/pointPath'),
+                "lon": float(root.findtext('slice_inputs/lon') or 0.0),
+                "lat": float(root.findtext('slice_inputs/lat') or 0.0),
+                "height": int(root.findtext('slice_inputs/height') or 512),
+                "width": int(root.findtext('slice_inputs/width') or 512),
+            }
+
+        # 3. 组装字典
         context.parsed_requirement = {
+            "detection_mode": mode,         
+            "slice_inputs": slice_inputs,   
+
             "task_type": root.findtext('task_type', "multi_payload_detection"),
             "payload_types": payload_types or context.request.payload_types,
             "target_classes": target_classes or context.request.target_classes,
