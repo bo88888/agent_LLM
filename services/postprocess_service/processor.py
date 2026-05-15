@@ -21,7 +21,6 @@ def run_false_alarm_filter(tool_results: Dict[str, Any], region: dict) -> List[d
         lat = det.get("center_Lat", 0.0)
         
         dist = calculate_distance(lon, lat, region.get("lon", 120.1), region.get("lat", 30.2))
-        print(f"🔍 检查目标: 坐标 [{lon}, {lat}], 距离中心点 {dist:.2f} km")
         # 几何与置信度双重约束
         if dist <= region.get("radius_km", 20) and det.get("score", 0) >= 0.85:
             filtered.append(det)

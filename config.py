@@ -12,9 +12,9 @@ OUTPUT_REPORT_PATH = "outputs/final_report.json"
 HTTP_TIMEOUT = 60
 QUALITY_THRESHOLD = 0.75
 
-PREPROCESS_URL = "http://10.124.124.57:8001/infer"       # Docker 1: 预处理
-DETECTION_URL = "http://10.124.124.57:8001/infer"        # Docker 2: 目标检测 (SAR + 光学)
-ELINT_URL = "http://10.124.124.57:8001/infer"            # Docker 3: 电子侦察
+PREPROCESS_URL = "http://127.0.0.1:8001/infer"       # Docker 1: 预处理
+DETECTION_URL = "http://127.0.0.1:8002/infer"        # Docker 2: 目标检测 (SAR + 光学)
+ELINT_URL = "http://127.0.0.1:8003/infer"            # Docker 3: 电子侦察
 
 
 # MOCK_URL = "http://127.0.0.1:8101/infer"

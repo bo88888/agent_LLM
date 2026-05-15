@@ -1,3 +1,4 @@
+import random
 from typing import Dict, Any
 from fastapi import FastAPI
 
@@ -15,7 +16,7 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
         {"lon": 120.1, "lat": 30.2, "radius_km": 20}
     )
 
-def run_local_ai_model(tool_name: str, target_name: str, params: dict) -> dict:
+def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict) -> dict:
     """
     在这里调用你 Docker 内部封装好的真实 AI 模型！
     把提取出的切片/底图路径传给模型进行推理。

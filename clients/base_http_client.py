@@ -20,12 +20,7 @@ class BaseHTTPClient:
         self.timeout = timeout
 
     def post_mcp(self, url: str, request: MCPRequest) -> MCPResponse:
-        """同步调用一个 MCP 工具服务。
 
-        参数：
-        - url: 服务地址，例如 http://127.0.0.1:8101/infer。
-        - request: 调度系统内部的 MCPRequest 对象。
-        """
         # 将 dataclass 对象转换成普通 dict。
         # FastAPI 服务里的 infer(payload: dict) 收到的就是这个 payload。
         payload = {
