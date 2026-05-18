@@ -89,3 +89,4 @@ def infer(payload: Dict[str, Any]):
     algo_response = run_local_preprocess_model(tool_name, tiff_path, params)
     
     return build_mcp_response(subtask_id, tool_name, algo_response)
+ 
