@@ -1,67 +1,8 @@
 version: "3.9"
 
 services:
-  sar_denoise_service:
-    build: ./services/sar_denoise_service
-    container_name: sar_denoise_service
-    ports: ["8101:8101"]
-
-  optical_enhance_service:
-    build: ./services/optical_enhance_service
-    container_name: optical_enhance_service
-    ports: ["8102:8102"]
-
-  geo_correction_service:
-    build: ./services/geo_correction_service
-    container_name: geo_correction_service
-    ports: ["8103:8103"]
-
-  sar_aircraft_service:
-    build: ./services/sar_aircraft_service
-    container_name: sar_aircraft_service
-    ports: ["8201:8201"]
-
-  sar_ship_service:
-    build: ./services/sar_ship_service
-    container_name: sar_ship_service
-    ports: ["8202:8202"]
-
-  sar_vehicle_service:
-    build: ./services/sar_vehicle_service
-    container_name: sar_vehicle_service
-    ports: ["8203:8203"]
-
-  optical_aircraft_service:
-    build: ./services/optical_aircraft_service
-    container_name: optical_aircraft_service
-    ports: ["8301:8301"]
-
-  optical_ship_service:
-    build: ./services/optical_ship_service
-    container_name: optical_ship_service
-    ports: ["8302:8302"]
-
-  optical_vehicle_service:
-    build: ./services/optical_vehicle_service
-    container_name: optical_vehicle_service
-    ports: ["8303:8303"]
-
-  elint_detection_service:
-    build: ./services/elint_detection_service
-    container_name: elint_detection_service
-    ports: ["8401:8401"]
-
-  false_alarm_filter_service:
-    build: ./services/false_alarm_filter_service
-    container_name: false_alarm_filter_service
-    ports: ["8501:8501"]
-
-  qb_fusion_service:
-    build: ./services/qb_fusion_service
-    container_name: qb_fusion_service
-    ports: ["8601:8601"]
-
-  report_service:
-    build: ./services/report_service
-    container_name: report_service
-    ports: ["8701:8701"]
+  algorithm_service:
+    build: ./services/algorithm_service
+    container_name: algorithm_service
+    ports: ["8000:8000"]
+    restart: always
