@@ -89,7 +89,7 @@ def run_elint_detection(region: dict) -> dict:
     }
 
 # ==========================================
-# 4. 极简的 MCP 格式封装 
+# 4. MCP 格式封装 
 # ==========================================
 def build_mcp_response(subtask_id: str, tool_name: str, algo_response: dict) -> dict:
 
