@@ -58,7 +58,7 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
     geo_deps = [t.subtask_id for t in tasks]
     if geo_deps:
         p3_params = {"target_resolution": "2m", "source_resolution": "200m"}
-        p3_params.update(task_params)
+        p3_params.update(base_params)
         tasks.append(
             SubTask(
                 subtask_id="P3",
