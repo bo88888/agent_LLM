@@ -3,7 +3,6 @@ from core.schema import ExecutionContext
 
 def normalize_target_region(region: dict) -> dict:
     """校验并规范化目标区域。"""
-    # 使用 or 巧妙处理传入 None 或空字符串的情况
     lon = float(region.get("lon") or 120.1)
     lat = float(region.get("lat") or 30.2)
     radius_km = float(region.get("radius_km") or 20)
@@ -39,11 +38,17 @@ class UnderstandingAgent:
                 "height": int(root.findtext('slice_inputs/height') or 512),
                 "width": int(root.findtext('slice_inputs/width') or 512),
             }
+        input_files = {
+            "SAR": root.findtext('input_files/SAR', ''),
+            "OPTICAL": root.findtext('input_files/OPTICAL', '')
+        }
+
 
         # 3. 组装字典
         context.parsed_requirement = {
             "detection_mode": mode,         
             "slice_inputs": slice_inputs,   
+            "input_files": input_files,
 
             "task_type": root.findtext('task_type', "multi_payload_detection"),
             "payload_types": payload_types or context.request.payload_types,

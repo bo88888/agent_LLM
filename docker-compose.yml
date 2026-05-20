@@ -4,5 +4,7 @@ services:
   algorithm_service:
     build: ./services/algorithm_service
     container_name: algorithm_service
-    ports: ["8000:8000"]
+    ports: ["8888:8000"]
+    volumes:
+      - ./data:/app/data
     restart: always

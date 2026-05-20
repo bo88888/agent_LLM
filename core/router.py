@@ -17,34 +17,39 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
     # 1. 提取需求数据
     payload_types = req.get("payload_types", [])
     mode = req.get("detection_mode", "base_map")
+    input_files = req.get("input_files", {})
     
-    # 2. 核心：根据识别模式构造专属参数字典
-    if mode == "base_map":
-        task_params = {"mode": "base_map", "tiff_path": req.get("tiff_path", "")}
-    else:
-        task_params = {"mode": "slice", **req.get("slice_inputs", {})}
+    # 2. 根据识别模式构造专属参数字典
+    base_params = {"mode": mode}
+    if mode == "slice":
+        base_params.update(req.get("slice_inputs", {}))
 
     # 如果任务需求里包含 SAR 载荷，则添加 SAR 去噪任务。
     # 该任务没有依赖，可以在调度开始后立即执行。
     if "SAR" in payload_types:
+        sar_params = base_params.copy()
+        sar_params["tiff_path"] = input_files.get("SAR", req.get("tiff_path", ""))
+
         tasks.append(
             SubTask(
                 subtask_id="P1",
                 name="SAR denoise",
                 tool_name="sar_denoise_service",
-                parameters=task_params
+                parameters=sar_params
             )
         )
 
     # 如果任务需求里包含光学载荷，则添加光学增强任务。
     # 该任务也没有依赖，可以和 P1 并发执行。
     if "OPTICAL" in payload_types:
+        opt_params = base_params.copy()
+        opt_params["tiff_path"] = input_files.get("OPTICAL", req.get("tiff_path", ""))
         tasks.append(
             SubTask(
                 subtask_id="P2",
                 name="Optical enhancement",
                 tool_name="optical_enhance_service",
-                parameters=task_params
+                parameters=opt_params
             )
         )
 

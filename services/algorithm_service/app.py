@@ -1,6 +1,8 @@
 import random
 from typing import Dict, Any
 from fastapi import FastAPI
+from SAR_pro import process_sar_image
+from opt_pro import process_optical_rs_image
 
 app = FastAPI()
 
@@ -39,34 +41,81 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
 # 2. 预处理逻辑 
 # ==========================================
 def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict) -> dict:
-    tool_configs = {
-        "sar_denoise_service": {
-            "msg": "SAR denoise finished",
-            "data": {"sar_denoised_path": f"{tiff_path}/sar_denoised.tif"},
-            "confidence": 0.95
-        },
-        "optical_enhance_service": {
-            "msg": "Optical enhancement finished",
-            "data": {"optical_enhanced_path": f"{tiff_path}/optical_enhanced.tif"},
-            "confidence": 0.94
-        },
-        "geo_correction_service": {
-            "msg": "Geo correction finished",
-            "data": {
-                "geo_corrected_path": "/workspace/geo_corrected",
-                "target_resolution": params.get("target_resolution", "2m")
-            },
-            "confidence": 0.93
+    if not tiff_path:
+        return {
+            "code": 500,
+            "msg": "Error: 未提供 tiff_path 参数",
+            "data": {},
+            "confidence": 0.0
         }
-    }
+        
+    base_dir = os.path.dirname(tiff_path)
+    base_name = os.path.basename(tiff_path)
+    name_only, ext = os.path.splitext(base_name)
 
-    config = tool_configs[tool_name]
-    return {
-        "code": 200,
-        "msg": config["msg"],
-        "data": config["data"],
-        "confidence": config["confidence"]
-    }
+    try:
+        if tool_name == "sar_denoise_service":
+            # 动态生成输出路径
+            output_sar = os.path.join(base_dir, f"{name_only}_sar_denoised{ext}")
+            
+            # 获取算法参数
+            kernel_size = params.get("kernel_size", 3)
+            clip_quant = params.get("clip_quant", 2)
+            n_std = params.get("n_std", 2)
+            
+            print(f"[预处理] 执行 SAR 去噪 | 输入: {tiff_path} | 输出: {output_sar}")
+            
+            # 调用真实算法
+            process_sar_image(tiff_path, output_sar, kernel_size, clip_quant, n_std)
+            
+            return {
+                "code": 200,
+                "msg": "SAR denoise finished (Real)",
+                "data": {"sar_denoised_path": output_sar},
+                "confidence": 0.95
+            }
+            
+        elif tool_name == "optical_enhance_service":
+            # 动态生成输出路径
+            output_opt = os.path.join(base_dir, f"{name_only}_optical_enhanced{ext}")
+            
+            # 获取算法参数
+            median_ksize = params.get("median_ksize", 3)
+            clip_percent = params.get("clip_percent", 2)
+            
+            print(f"[预处理] 执行 光学增强 | 输入: {tiff_path} | 输出: {output_opt}")
+            
+            # 调用真实算法
+            process_optical_rs_image(tiff_path, output_opt, median_ksize, clip_percent)
+            
+            return {
+                "code": 200,
+                "msg": "Optical enhancement finished (Real)",
+                "data": {"optical_enhanced_path": output_opt},
+                "confidence": 0.94
+            }
+            
+        elif tool_name == "geo_correction_service":
+            # 几何校正暂时保持 mock，但动态生成路径
+            mock_geo_path = os.path.join(base_dir, "geo_mock.tif")
+            return {
+                "code": 200,
+                "msg": "Geo correction finished",
+                "data": {
+                    "geo_corrected_path": mock_geo_path,
+                    "target_resolution": params.get("target_resolution", "2m")
+                },
+                "confidence": 0.93
+            }
+            
+    except Exception as e:
+        print(f"预处理执行异常: {traceback.format_exc()}")
+        return {
+            "code": 500,
+            "msg": f"Algorithm execution failed: {str(e)}",
+            "data": {},
+            "confidence": 0.0
+        }
 
 # ==========================================
 # 3. 电子侦察逻辑 (ELINT)
@@ -80,11 +129,10 @@ def run_elint_detection(region: dict) -> dict:
         "center_Lat": region.get("lat", 30.2), 
         "score": 0.84
     }
-    
     return {
         "code": 200, 
         "msg": "ELINT detection finished", 
-        "data": {"detections": [target_data]},s
+        "data": {"detections": [target_data]}, 
         "confidence": 0.84
     }
 
@@ -109,11 +157,12 @@ def build_mcp_response(subtask_id: str, tool_name: str, algo_response: dict) -> 
 def infer(payload: Dict[str, Any]):
     tool_name = payload.get("tool_name", "")
     subtask_id = payload.get("subtask_id", "")
+    input_data = payload.get("input_data", {})
     params = payload.get("parameters", {})
     
     # --- 1. 预处理模块 ---
     if tool_name in {"sar_denoise_service", "optical_enhance_service", "geo_correction_service"}:
-        tiff_path = payload.get("input_data", {}).get("tiff_path", "")
+        tiff_path = params.get("tiff_path") or input_data.get("tiff_path", "")
         algo_response = run_local_preprocess_model(tool_name, tiff_path, params)
         
     # --- 2. 视觉目标检测模块 ---

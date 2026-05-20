@@ -12,7 +12,7 @@ OUTPUT_REPORT_PATH = "outputs/final_report.json"
 HTTP_TIMEOUT = 60
 QUALITY_THRESHOLD = 0.75
 
-ALGORITHM_URL = "http://127.0.0.1:8000/infer"
+ALGORITHM_URL = "http://127.0.0.1:8888/infer"
 
 TOOL_SERVICE_MAP = {
     # 预处理

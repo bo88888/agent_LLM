@@ -2,7 +2,7 @@
 <requirement>
     <task_type>multi_payload_detection</task_type>
 
-    <detection_mode>slice</detection_mode>
+    <detection_mode>base_map</detection_mode>
 
     <slice_inputs>
         <basePath>data/sample_packet/base_map.tif</basePath>
@@ -18,6 +18,11 @@
         <type>OPTICAL</type>
         <type>ELINT</type>
     </payload_types>
+
+    <input_files>
+        <SAR>data/sample_packet/IMAGE_PRSC-S1_SAR_WH0731_06221709102025_001064_S15_I01_GEC_1_HH_clip_processed.tif</SAR>
+        <OPTICAL>data/sample_packet/Suaogang_processed.tif</OPTICAL>
+    </input_files>
 
     <target_classes>
         <class>aircraft</class>
