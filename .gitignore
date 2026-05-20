@@ -23,3 +23,7 @@ outputs/*.json
 *.log
 *.tmp
 .env
+
+# TIFF 图像文件
+*.tif
+*.tiff
