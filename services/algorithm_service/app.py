@@ -1,6 +1,7 @@
 import os
 import random
 from typing import Dict, Any
+import traceback
 from fastapi import FastAPI
 from SAR_pro import process_sar_image
 from opt_pro import process_optical_rs_image

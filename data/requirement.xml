@@ -20,8 +20,8 @@
     </payload_types>
 
     <input_files>
-        <SAR>data/sample_packet/IMAGE_PRSC-S1_SAR_WH0731_06221709102025_001064_S15_I01_GEC_1_HH_clip_processed.tif</SAR>
-        <OPTICAL>data/sample_packet/Suaogang_processed.tif</OPTICAL>
+        <SAR>data/sample_packet/IMAGE_PRSC-S1_SAR_WH0731_06221709102025_001064_S15_I01_GEC_1_HH_clip.tif</SAR>
+        <OPTICAL>data/sample_packet/Suaogang.tif</OPTICAL>
     </input_files>
 
     <target_classes>
