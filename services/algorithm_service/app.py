@@ -1,7 +1,8 @@
 import os
 import random
-from typing import Dict, Any
 import traceback
+import subprocess
+from typing import Dict, Any
 from fastapi import FastAPI
 from SAR_pro import process_sar_image
 from opt_pro import process_optical_rs_image
@@ -42,7 +43,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
 # ==========================================
 # 2. 预处理逻辑 
 # ==========================================
-def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict) -> dict:
+def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, input_data: dict) -> dict:
     if not tiff_path:
         return {
             "code": 500,
@@ -96,20 +97,69 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict) -> 
                 "data": {"optical_enhanced_path": output_opt},
                 "confidence": 0.94
             }
-            
         elif tool_name == "geo_correction_service":
-            # 几何校正暂时保持 mock，但动态生成路径
-            mock_geo_path = os.path.join(base_dir, "geo_mock.tif")
+            # ① 获取坐标参考底图 (image1)
+            base_map_path = "data/sample_packet/AS08_FDJ_JS_006914_E174.7_S41.3_20260219030736_L2_HH_04_001_opt_cut1.tif"
+            
+            # ② 收集上游的所有待校正影像 (image2)
+            previous_results = input_data.get("previous_results", {})
+            images_to_correct = []
+            
+            for res_content in previous_results.values():
+                if "sar_denoised_path" in res_content:
+                    images_to_correct.append(res_content["sar_denoised_path"])
+                if "optical_enhanced_path" in res_content:
+                    images_to_correct.append(res_content["optical_enhanced_path"])
+    
+            corrected_results = []
+            
+            # ③ 遍历执行 C++ 几何精校正算法
+            for source_image_path in images_to_correct:
+                src_dir = os.path.dirname(source_image_path)
+                src_base = os.path.basename(source_image_path)
+                src_name_only, src_ext = os.path.splitext(src_base)
+                
+                # 设置 C++ 算法指定的输出名称格式
+                output_dir = os.path.join(src_dir, f"geo_output_{src_name_only}/")
+                os.makedirs(log_dir, exist_ok=True)
+                
+                cmd = [
+                    exe_path,
+                    base_map_path,      # 绝对准确的参考地图 (image1)
+                    source_image_path,  # 预处理完的 SAR 或 光学图 (image2)
+                    output_dir          # 核心输出图 image_geo_correct
+                ]
+                
+                print(f"[预处理-几何精校正] 正在配准: {src_base}\n执行命令: {' '.join(cmd)}")
+                
+                # 拉起 C++ 进程
+                sub_res = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace')
+                print(f"[C++ 核心输出 - {src_base}]:\n{sub_res.stdout}")
+                
+                corrected_results.append({
+                    "original_input": source_image_path,
+                    "geo_corrected_path": output_path2
+                })
+            
             return {
                 "code": 200,
-                "msg": "Geo correction finished",
+                "msg": f"Geo correction finished for {len(corrected_results)} images.",
                 "data": {
-                    "geo_corrected_path": mock_geo_path,
+                    "geo_corrected_path": corrected_results[-1]["geo_corrected_path"],
+                    "all_corrected_results": corrected_results,
                     "target_resolution": params.get("target_resolution", "2m")
                 },
-                "confidence": 0.93
+                "confidence": 0.96
             }
             
+    except subprocess.CalledProcessError as sub_err:
+        print(f"[C++ 运行期异常崩溃]:\n{sub_err.stderr}")
+        return {"code": 500, "msg": f"C++ execution failed: {sub_err.stderr}", "data": {}, "confidence": 0.0}
+    
+    except Exception as e:
+        print(f"预处理执行异常: {traceback.format_exc()}")
+        return {"code": 500, "msg": f"Algorithm execution failed: {str(e)}", "data": {}, "confidence": 0.0}
+
     except Exception as e:
         print(f"预处理执行异常: {traceback.format_exc()}")
         return {
@@ -118,6 +168,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict) -> 
             "data": {},
             "confidence": 0.0
         }
+
 
 # ==========================================
 # 3. 电子侦察逻辑 (ELINT)
@@ -165,7 +216,7 @@ def infer(payload: Dict[str, Any]):
     # --- 1. 预处理模块 ---
     if tool_name in {"sar_denoise_service", "optical_enhance_service", "geo_correction_service"}:
         tiff_path = params.get("tiff_path") or input_data.get("tiff_path", "")
-        algo_response = run_local_preprocess_model(tool_name, tiff_path, params)
+        algo_response = run_local_preprocess_model(tool_name, tiff_path, params, input_data)
         
     # --- 2. 视觉目标检测模块 ---
     elif tool_name in {
