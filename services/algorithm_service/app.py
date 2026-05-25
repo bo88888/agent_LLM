@@ -99,6 +99,13 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             
             # ① 获取参考底图路径
             base_map_path = "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif"
+            if not os.path.exists(base_map_path):
+                return {
+                    "code": 500,
+                    "msg": f"reference image not found: {base_map_path}",
+                    "data": {},
+                    "confidence": 0.0
+                }
             
             # ② 收集上游的所有待校正影像
             previous_results = input_data.get("previous_results", {})
@@ -116,23 +123,54 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             # 增加致命路径检查
             if not os.path.exists(exe_path):
                 print(f"[错误] 致命：在容器内未找到执行程序 {exe_path}，当前目录: {os.getcwd()}")
-                return {"code": 500, "msg": "程序不存在", "data": {}, "confidence": 0.0}
+                return {"code": 500, "msg": f"program not found: {exe_path}", "data": {}, "confidence": 0.0}
         
+            corrected_results = []
             for source_image_path in images_to_correct:
-                output_dir = os.path.dirname(source_image_path)
+                if not os.path.exists(source_image_path):
+                    return {
+                        "code": 500,
+                        "msg": f"source image not found: {source_image_path}",
+                        "data": {},
+                        "confidence": 0.0
+                    }
+
+                output_dir = os.path.dirname(source_image_path) or "."
+                os.makedirs(output_dir, exist_ok=True)
                 cmd = [exe_path, base_map_path, source_image_path, output_dir]
                 
                 print(f"[执行] 命令: {' '.join(cmd)}")
                 
                 # 显式捕获所有输出
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    errors="replace",
+                    timeout=int(params.get("timeout", 300)),
+                )
                 
                 if result.returncode != 0:
                     print(f"[C++ 崩溃日志] stdout: {result.stdout}")
                     print(f"[C++ 崩溃日志] stderr: {result.stderr}")
-                    return {"code": 500, "msg": f"C++执行失败: {result.stderr}", "data": {}, "confidence": 0.0}
+                    error_detail = (result.stderr or result.stdout or f"exit code {result.returncode}").strip()
+                    return {"code": 500, "msg": f"C++ geo correction failed: {error_detail}", "data": {}, "confidence": 0.0}
+
+                corrected_results.append({
+                    "original_input": source_image_path,
+                    "geo_corrected_path": os.path.join(output_dir, "image_geo_correct.tif")
+                })
             
-            return {"code": 200, "msg": "成功", "data": {"geo_corrected_path": "done"}, "confidence": 0.96}
+            return {
+                "code": 200,
+                "msg": "Geo correction finished",
+                "data": {
+                    "geo_corrected_path": corrected_results[-1]["geo_corrected_path"],
+                    "all_corrected_results": corrected_results,
+                    "target_resolution": params.get("target_resolution", "2m")
+                },
+                "confidence": 0.96
+            }
         # elif tool_name == "geo_correction_service":
         #     # ① 获取坐标参考底图 (image1)
         #     base_map_path = "data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif"

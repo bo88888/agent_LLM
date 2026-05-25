@@ -115,7 +115,7 @@ class SchedulerCenter:
 
             for task, result in zip(ready_tasks, results):
                 if isinstance(result, Exception):
-                    self._retry_or_fail(context, task, str(result))
+                    self._retry_or_fail(context, task, str(result) or result.__class__.__name__)
                     continue
 
                 context.tool_results[task.subtask_id] = result
