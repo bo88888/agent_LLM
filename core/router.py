@@ -24,39 +24,56 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
     if mode == "slice":
         base_params.update(req.get("slice_inputs", {}))
 
+    actual_geo_deps = []
     # 如果任务需求里包含 SAR 载荷，则添加 SAR 去噪任务。
     # 该任务没有依赖，可以在调度开始后立即执行。
     if "SAR" in payload_types:
-        sar_params = base_params.copy()
-        sar_params["tiff_path"] = input_files.get("SAR", req.get("tiff_path", ""))
-
-        tasks.append(
-            SubTask(
-                subtask_id="P1",
-                name="SAR denoise",
-                tool_name="sar_denoise_service",
-                parameters=sar_params
+        sar_path = input_files.get("SAR", "")
+        # 只有当 XML 里的 <SAR> 标签配了具体的有效文件路径时，该任务才算有效
+        if sar_path and sar_path.strip():
+            sar_params = base_params.copy()
+            sar_params["tiff_path"] = sar_path
+            
+            tasks.append(
+                SubTask(
+                    subtask_id="P1",
+                    name="SAR denoise",
+                    tool_name="sar_denoise_service",
+                    parameters=sar_params
+                )
             )
-        )
+            # 记录有效的依赖：P3 必须等待 P1 成功
+            actual_geo_deps.append("P1")
+        else:
+            print("[路由提示] 需求中包含 SAR 载荷，但未提供有效输入文件路径，已自动忽略 P1 节点。")
+
 
     # 如果任务需求里包含光学载荷，则添加光学增强任务。
     # 该任务也没有依赖，可以和 P1 并发执行。
+    # 检查并添加 光学增强任务
     if "OPTICAL" in payload_types:
-        opt_params = base_params.copy()
-        opt_params["tiff_path"] = input_files.get("OPTICAL", req.get("tiff_path", ""))
-        tasks.append(
-            SubTask(
-                subtask_id="P2",
-                name="Optical enhancement",
-                tool_name="optical_enhance_service",
-                parameters=opt_params
+        opt_path = input_files.get("OPTICAL", "")
+        # 只有当 XML 里的 <OPTICAL> 标签配了具体的有效文件路径时，该任务才算有效
+        if opt_path and opt_path.strip():
+            opt_params = base_params.copy()
+            opt_params["tiff_path"] = opt_path
+            
+            tasks.append(
+                SubTask(
+                    subtask_id="P2",
+                    name="Optical enhancement",
+                    tool_name="optical_enhance_service",
+                    parameters=opt_params
+                )
             )
-        )
+            # 记录有效的依赖：P3 必须等待 P2 成功
+            actual_geo_deps.append("P2")
+        else:
+            print("[路由提示] 需求中包含 OPTICAL 载荷，但未提供有效输入文件路径，已自动忽略 P2 节点。")
 
     # 几何校正需要基于前面的预处理结果。
-    # 如果 P1/P2 中至少有一个存在，就添加 P3，并让 P3 依赖所有预处理任务。
-    geo_deps = [t.subtask_id for t in tasks]
-    if geo_deps:
+    # 如果 P1/P2 中至少有一个存在，就添加 P3，并让 P3 依赖所有预处理任务。   
+    if actual_geo_deps:
         p3_params = {"target_resolution": "2m", "source_resolution": "200m"}
         p3_params.update(base_params)
         tasks.append(
@@ -64,13 +81,15 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
                 subtask_id="P3",
                 name="Geo correction",
                 tool_name="geo_correction_service",
-                dependencies=geo_deps,
+                dependencies=actual_geo_deps,  # 🌟 动态绑定！可能是 ["P1"], ["P2"] 或 ["P1", "P2"]
                 parameters=p3_params,
             )
         )
+    else:
+        print("[路由提示] 流水线未检测到任何有效的 SAR 或光学输入图片，不生成 P3 几何校正任务。")
 
     return tasks
-
+ 
 
 def build_detection_tasks(req: dict) -> List[SubTask]:
     """根据载荷类型和目标类型生成检测阶段任务。

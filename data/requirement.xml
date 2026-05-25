@@ -12,15 +12,14 @@
         <height>512</height>
         <width>512</width>
     </slice_inputs>
-
     <payload_types>
-        <type>SAR</type>
+        <!-- <type>SAR</type> -->
         <type>OPTICAL</type>
         <type>ELINT</type>
     </payload_types>
 
     <input_files>
-        <SAR>data/sample_packet/IMAGE_PRSC-S1_SAR_WH0731_06221709102025_001064_S15_I01_GEC_1_HH_clip.tif</SAR>
+        <!-- <SAR>data/sample_packet/IMAGE_PRSC-S1_SAR_WH0731_06221709102025_001064_S15_I01_GEC_1_HH_clip.tif</SAR> -->
         <OPTICAL>data/sample_packet/Suaogang.tif</OPTICAL>
     </input_files>
 

@@ -16,7 +16,10 @@ class SchedulerCenter:
         for task in context.subtasks:
             if task.status != TaskStatus.PENDING:
                 continue
-
+            # 打印调试信息
+            deps_status = {dep: context.tool_results.get(dep) for dep in task.dependencies}
+            print(f"[调度调试] 检查任务 {task.subtask_id}, 依赖状态: {deps_status}")
+            
             all_deps_ok = True
             for dep in task.dependencies:
                 dep_result = context.tool_results.get(dep)

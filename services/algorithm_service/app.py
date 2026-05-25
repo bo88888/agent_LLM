@@ -44,17 +44,13 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
 # 2. 预处理逻辑 
 # ==========================================
 def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, input_data: dict) -> dict:
-    if not tiff_path:
-        return {
-            "code": 500,
-            "msg": "Error: 未提供 tiff_path 参数",
-            "data": {},
-            "confidence": 0.0
-        }
+    if tool_name in {"sar_denoise_service", "optical_enhance_service"}:
+        if not tiff_path or not os.path.exists(tiff_path):
+            return {"code": 404, "msg": "文件不存在", "data": {}, "confidence": 0.0}
         
-    base_dir = os.path.dirname(tiff_path)
-    base_name = os.path.basename(tiff_path)
-    name_only, ext = os.path.splitext(base_name)
+    base_dir = os.path.dirname(tiff_path) if tiff_path else ""
+    base_name = os.path.basename(tiff_path) if tiff_path else ""
+    name_only, ext = os.path.splitext(base_name) if base_name else ("", "")
 
     try:
         if tool_name == "sar_denoise_service":
@@ -98,59 +94,110 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 "confidence": 0.94
             }
         elif tool_name == "geo_correction_service":
-            # ① 获取坐标参考底图 (image1)
-            base_map_path = "data/sample_packet/AS08_FDJ_JS_006914_E174.7_S41.3_20260219030736_L2_HH_04_001_opt_cut1.tif"
+            # 增加一个最顶层的打印，确认请求确实进来了
+            print(f"[调试] P3 已进入 geo_correction_service，input_data: {input_data.keys()}")
             
-            # ② 收集上游的所有待校正影像 (image2)
+            # ① 获取参考底图路径
+            base_map_path = "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif"
+            
+            # ② 收集上游的所有待校正影像
             previous_results = input_data.get("previous_results", {})
             images_to_correct = []
-            
             for res_content in previous_results.values():
-                if "sar_denoised_path" in res_content:
-                    images_to_correct.append(res_content["sar_denoised_path"])
-                if "optical_enhanced_path" in res_content:
-                    images_to_correct.append(res_content["optical_enhanced_path"])
-    
-            corrected_results = []
+                path = res_content.get("optical_enhanced_path") or res_content.get("sar_denoised_path")
+                if path: images_to_correct.append(path)
             
-            # ③ 遍历执行 C++ 几何精校正算法
+            print(f"[调试] 待校正图片列表: {images_to_correct}")
+            if not images_to_correct:
+                return {"code": 500, "msg": "未找到待校正图片", "data": {}, "confidence": 0.0}
+
+            # ③ 执行 C++ 核心
+            exe_path = "/app/myprogram"
+            # 增加致命路径检查
+            if not os.path.exists(exe_path):
+                print(f"[错误] 致命：在容器内未找到执行程序 {exe_path}，当前目录: {os.getcwd()}")
+                return {"code": 500, "msg": "程序不存在", "data": {}, "confidence": 0.0}
+        
             for source_image_path in images_to_correct:
-                src_dir = os.path.dirname(source_image_path)
-                src_base = os.path.basename(source_image_path)
-                src_name_only, src_ext = os.path.splitext(src_base)
+                output_dir = os.path.dirname(source_image_path)
+                cmd = [exe_path, base_map_path, source_image_path, output_dir]
                 
-                # 设置 C++ 算法指定的输出名称格式
-                output_dir = os.path.join(src_dir, f"geo_output_{src_name_only}/")
-                os.makedirs(log_dir, exist_ok=True)
+                print(f"[执行] 命令: {' '.join(cmd)}")
                 
-                cmd = [
-                    exe_path,
-                    base_map_path,      # 绝对准确的参考地图 (image1)
-                    source_image_path,  # 预处理完的 SAR 或 光学图 (image2)
-                    output_dir          # 核心输出图 image_geo_correct
-                ]
+                # 显式捕获所有输出
+                result = subprocess.run(cmd, capture_output=True, text=True)
                 
-                print(f"[预处理-几何精校正] 正在配准: {src_base}\n执行命令: {' '.join(cmd)}")
-                
-                # 拉起 C++ 进程
-                sub_res = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace')
-                print(f"[C++ 核心输出 - {src_base}]:\n{sub_res.stdout}")
-                
-                corrected_results.append({
-                    "original_input": source_image_path,
-                    "geo_corrected_path": output_path2
-                })
+                if result.returncode != 0:
+                    print(f"[C++ 崩溃日志] stdout: {result.stdout}")
+                    print(f"[C++ 崩溃日志] stderr: {result.stderr}")
+                    return {"code": 500, "msg": f"C++执行失败: {result.stderr}", "data": {}, "confidence": 0.0}
             
-            return {
-                "code": 200,
-                "msg": f"Geo correction finished for {len(corrected_results)} images.",
-                "data": {
-                    "geo_corrected_path": corrected_results[-1]["geo_corrected_path"],
-                    "all_corrected_results": corrected_results,
-                    "target_resolution": params.get("target_resolution", "2m")
-                },
-                "confidence": 0.96
-            }
+            return {"code": 200, "msg": "成功", "data": {"geo_corrected_path": "done"}, "confidence": 0.96}
+        # elif tool_name == "geo_correction_service":
+        #     # ① 获取坐标参考底图 (image1)
+        #     base_map_path = "data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif"
+        #     # ② 收集上游的所有待校正影像 (image2)
+        #     previous_results = input_data.get("previous_results", {})
+        #     images_to_correct = []
+            
+        #     for res_content in previous_results.values():
+        #         if "sar_denoised_path" in res_content:
+        #             images_to_correct.append(res_content["sar_denoised_path"])
+        #         if "optical_enhanced_path" in res_content:
+        #             images_to_correct.append(res_content["optical_enhanced_path"])
+
+        #     if not images_to_correct:
+        #         return {
+        #             "code": 500,
+        #             "msg": "流水线上游没有传下来 SAR 或光学图，无法执行精校正",
+        #             "data": {},
+        #             "confidence": 0.0
+        #         }
+        #     corrected_results = []
+        #     exe_path = os.path.join(os.path.dirname(__file__), "myprogram")
+        #     if not os.path.exists(exe_path):
+        #         raise FileNotFoundError(f"未找到 C++ 执行程序: {exe_path}")
+        
+        #     # ③ 遍历执行 C++ 几何精校正算法
+        #     for source_image_path in images_to_correct:
+        #         src_dir = os.path.dirname(source_image_path)
+        #         src_base = os.path.basename(source_image_path)
+        #         src_name_only, src_ext = os.path.splitext(src_base)
+                
+        #         # 设置 C++ 算法指定的输出名称格式
+        #         output_dir = os.path.join(src_dir, f"geo_output_{src_name_only}/")
+        #         os.makedirs(output_dir, exist_ok=True)
+                
+        #         cmd = [
+        #             exe_path,
+        #             base_map_path,      # 绝对准确的参考地图 (image1)
+        #             source_image_path,  # 预处理完的 SAR 或 光学图 (image2)
+        #             output_dir          # 核心输出图 image_geo_correct
+        #         ]
+                
+        #         print(f"[预处理-几何精校正] 正在配准: {src_base}\n执行命令: {' '.join(cmd)}")
+                
+        #         # 拉起 C++ 进程
+        #         sub_res = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, errors='replace')
+        #         print(f"[C++ 核心输出 - {src_base}]:\n{sub_res.stdout}")
+        #         final_geo_corrected_path = os.path.join(output_dir, "image_geo_correct.tif")
+
+                
+        #         corrected_results.append({
+        #             "original_input": source_image_path,
+        #             "geo_corrected_path": final_geo_corrected_path
+        #         })
+            
+        #     return {
+        #         "code": 200,
+        #         "msg": f"Geo correction finished for {len(corrected_results)} images.",
+        #         "data": {
+        #             "geo_corrected_path": corrected_results[-1]["geo_corrected_path"],
+        #             "all_corrected_results": corrected_results,
+        #             "target_resolution": params.get("target_resolution", "2m")
+        #         },
+        #         "confidence": 0.96
+        #     }
             
     except subprocess.CalledProcessError as sub_err:
         print(f"[C++ 运行期异常崩溃]:\n{sub_err.stderr}")
@@ -215,8 +262,14 @@ def infer(payload: Dict[str, Any]):
     
     # --- 1. 预处理模块 ---
     if tool_name in {"sar_denoise_service", "optical_enhance_service", "geo_correction_service"}:
+        # 🌟 关键修改：不要让空 tiff_path 阻止请求进入，后面函数内部会处理
         tiff_path = params.get("tiff_path") or input_data.get("tiff_path", "")
+        
+        # 强制打印调试日志：看看发进来的到底是什么
+        print(f"[调试] infer 收到预处理请求: {tool_name}, tiff_path: {tiff_path}")
+        
         algo_response = run_local_preprocess_model(tool_name, tiff_path, params, input_data)
+
         
     # --- 2. 视觉目标检测模块 ---
     elif tool_name in {

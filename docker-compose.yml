@@ -7,4 +7,5 @@ services:
     ports: ["8888:8000"]
     volumes:
       - ./data:/app/data
+      - ./services/algorithm_service:/app
     restart: always
