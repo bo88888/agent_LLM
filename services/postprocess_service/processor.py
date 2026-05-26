@@ -36,37 +36,39 @@ def run_qb_fusion(filtered_detections: List[dict], merge_threshold_km: float = 0
         lat1 = det.get("center_Lat", 0.0)
         target_name = det.get("targetName", "unknown")
         source = det.get("fusionSource", "unknown")
-        
-        # 寻找是否已经有距离相近的、同类的融合目标
         merged = False
         for ft in fused_targets:
             lon2 = ft.get("center_Lon", 0.0)
             lat2 = ft.get("center_Lat", 0.0)
-            
-            # 计算当前检测目标与已有融合目标的距离
             dist = calculate_distance(lon1, lat1, lon2, lat2)
-            
-            # 如果距离小于阈值（默认100米），且目标类型一致，认为是同一个目标进行合并
+
+            # 如果距离小于阈值且目标类型一致，进行融合
             if dist <= merge_threshold_km and ft.get("targetName") == target_name:
-                # 把新的信源加进去
                 if source not in ft["_sources_list"]:
                     ft["_sources_list"].append(source)
                 
                 # 置信度取最大值
                 ft["score"] = max(ft.get("score", 0), det.get("score", 0))
-                # 将信源拼接成文档要求的字符串，例如: "sar_aircraft_service,optical_aircraft_service"
+                
+                # 更新多信源融合字段
                 ft["fusionSource"] = ",".join(ft["_sources_list"])
-                ft["fusionInfo"] = f"多源融合 ({len(ft['_sources_list'])} 个独立信源)"
+                ft["fusionBasis"] = f"空间邻近同类准则(相距 {dist:.3f} km)"
+                ft["fusionInfo"] = f"多源智能融合 ({len(ft['_sources_list'])}个独立信源)"
+                ft["auxInterpretationInfo"] = f"经多源交叉验证，目标置信度可靠。多源位置覆盖区中心: [{ft['center_Lon']:.4f}, {ft['center_Lat']:.4f}]"
                 merged = True
                 break
-                
-        # 如果没有相近的目标，就当做一个新目标加进去
+
         if not merged:
-            # 直接复制当前检测到的完整字典（保留所有的 leftTopX 等字段）
+            # 单一信源逻辑
             new_target = det.copy()
             new_target["target_id"] = f"QB_{len(fused_targets) + 1:03d}"
-            new_target["_sources_list"] = [source] # 内部辅助列表，用于记录信源
+            new_target["_sources_list"] = [source]
+            
+            new_target["fusionSource"] = source
+            new_target["fusionBasis"] = "单信源几何约束过滤"
             new_target["fusionInfo"] = "单一信源"
+            new_target["auxInterpretationInfo"] = det.get("auxInterpretationInfo", "无异常辅助判读信息")
+       
             fused_targets.append(new_target)
             
     for ft in fused_targets:

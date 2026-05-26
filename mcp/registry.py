@@ -10,11 +10,6 @@ class ToolRegistry:
     """
 
     def __init__(self):
-        # 内部字典结构：
-        # {
-        #     "sar_denoise_service": "http://127.0.0.1:8101/infer",
-        #     "geo_correction_service": "http://127.0.0.1:8103/infer",
-        # }
         self._services = {}
 
     def register(self, tool_name: str, service_url: str):

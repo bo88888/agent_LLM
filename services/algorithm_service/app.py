@@ -23,14 +23,38 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
     lat = float(params.get("lat", 30.2))
     score = round(random.uniform(0.88, 0.98), 2)
     
+    # 模拟真实的目标框大小(经纬度跨度)和中心点偏移
+    hw_lon = 0.005
+    hh_lat = 0.005
+    center_lon = lon + random.uniform(-0.01, 0.01)
+    center_lat = lat + random.uniform(-0.01, 0.01)
+    
     target_data = {
         "targetName": target_name,
+        
+        # --- 像素百分比坐标 ---
         "leftTopX": 0.15, "leftTopY": 0.15,
+        "leftBotX": 0.15, "leftBotY": 0.85,
+        "rightTopX": 0.85, "rightTopY": 0.15,
         "rightBotX": 0.85, "rightBotY": 0.85,
-        "center_Lon": lon + random.uniform(-0.005, 0.005), 
-        "center_Lat": lat + random.uniform(-0.005, 0.005),
-        "algorithmSource": tool_name,
-        "score": score
+        "center_x": 0.50, "center_y": 0.50,
+        
+        # --- 真实地理坐标 (严格照应文档24字段) ---
+        "leftTopLon": round(center_lon - hw_lon, 6),
+        "leftTopLat": round(center_lat + hh_lat, 6),
+        "leftBotLon": round(center_lon - hw_lon, 6),
+        "leftBotLat": round(center_lat - hh_lat, 6),
+        "rightTopLon": round(center_lon + hw_lon, 6),
+        "rightTopYLat": round(center_lat + hh_lat, 6),
+        "rightBotXLon": round(center_lon + hw_lon, 6),
+        "rightBotYLat": round(center_lat - hh_lat, 6),
+        "center_Lon": round(center_lon, 6),
+        "center_Lat": round(center_lat, 6),
+        
+        # --- 业务属性 ---
+        "score": score,
+        "fusionSource": tool_name,  # ★ 已将 algorithmSource 修正为 fusionSource
+        "auxInterpretationInfo": "视觉算法原始检出"
     }
     
     return {
@@ -175,19 +199,49 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
 # 3. 电子侦察逻辑 (ELINT)
 # ==========================================
 def run_elint_detection(region: dict) -> dict:
+    base_lon = float(region.get("lon", 120.1))
+    base_lat = float(region.get("lat", 30.2))
+    score = 0.84
+    
+    # ELINT的散布范围通常更大，所以宽高设大一点
+    hw_lon = 0.015
+    hh_lat = 0.015
+    center_lon = base_lon + random.uniform(-0.02, 0.02)
+    center_lat = base_lat + random.uniform(-0.02, 0.02)
+
     target_data = {
-        "id": "elint_001", 
         "targetName": "signal", 
-        "algorithmSource": "ELINT",
-        "center_Lon": region.get("lon", 120.1), 
-        "center_Lat": region.get("lat", 30.2), 
-        "score": 0.84
+        
+        # --- 像素百分比坐标 (默认全覆盖) ---
+        "leftTopX": 0.10, "leftTopY": 0.10,
+        "leftBotX": 0.10, "leftBotY": 0.90,
+        "rightTopX": 0.90, "rightTopY": 0.10,
+        "rightBotX": 0.90, "rightBotY": 0.90,
+        "center_x": 0.50, "center_y": 0.50,
+        
+        # --- 真实地理坐标 ---
+        "leftTopLon": round(center_lon - hw_lon, 6),
+        "leftTopLat": round(center_lat + hh_lat, 6),
+        "leftBotLon": round(center_lon - hw_lon, 6),
+        "leftBotLat": round(center_lat - hh_lat, 6),
+        "rightTopLon": round(center_lon + hw_lon, 6),
+        "rightTopYLat": round(center_lat + hh_lat, 6),
+        "rightBotXLon": round(center_lon + hw_lon, 6),
+        "rightBotYLat": round(center_lat - hh_lat, 6),
+        "center_Lon": round(center_lon, 6),
+        "center_Lat": round(center_lat, 6),
+        
+        # --- 业务属性 ---
+        "score": score,
+        "fusionSource": "elint_detection_service", # ★ 已修正为 fusionSource
+        "auxInterpretationInfo": "电子侦察原始检出"
     }
+    
     return {
         "code": 200, 
         "msg": "ELINT detection finished", 
         "data": {"detections": [target_data]}, 
-        "confidence": 0.84
+        "confidence": score
     }
 
 # ==========================================
