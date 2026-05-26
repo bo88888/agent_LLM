@@ -53,8 +53,8 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         
         # --- 业务属性 ---
         "score": score,
-        "fusionSource": tool_name,  # ★ 已将 algorithmSource 修正为 fusionSource
-        "auxInterpretationInfo": "视觉算法原始检出"
+        "fusionSource": tool_name,  
+        "auxInterpretationInfo": "光学目标检测算法原始检出"
     }
     
     return {
@@ -137,7 +137,6 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 src_dir = os.path.dirname(source_image_path) or "."
                 src_base = os.path.basename(source_image_path)
                 
-                # 默认 C++ 吐出的文件
                 cpp_default_output = os.path.join(src_dir, "image_geo_correct.tif")
                 final_geo_path = os.path.join(src_dir, f"geo_correction_{src_base}")
                 
@@ -278,7 +277,7 @@ def infer(payload: Dict[str, Any]):
         algo_response = run_local_preprocess_model(tool_name, tiff_path, params, input_data)
 
         
-    # --- 2. 视觉目标检测模块 ---
+    # --- 2. 目标检测模块 ---
     elif tool_name in {
         "sar_aircraft_service", "sar_ship_service", "sar_vehicle_service",
         "optical_aircraft_service", "optical_ship_service", "optical_vehicle_service"
