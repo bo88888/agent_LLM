@@ -530,6 +530,43 @@ def main():
     print("\n推理结果汇总:")
     print(json.dumps(all_results, ensure_ascii=False, indent=2, default=numpy_serializer))
 
+# ==========================================
+# 新增：提供给 app.py 调用的对外接口
+# ==========================================
+def run_optical_detection(image_path, model_path, output_root, object_type='ship', conf=0.2):
+    # 初始化模型
+    model = YOLO(model_path)
+    
+    # 获取类别
+    if object_type == 'ship':
+        class_names = [
+            'aircraft_carrier', 'destroyer', 'cruiser', 'amphibious', 'depot_ship',
+            'HJship', 'BHship', 'minchuan', 'other_junchuan', 'huweijian'
+        ]
+    elif object_type == 'plane':
+        class_names = [
+            'hongzhaji', 'yunshuji', 'Helicopter', 'UAV', 'airline',
+            'fighter', 'jiayouji', 'other', 'yujingji'
+        ]
+    elif object_type == 'vehicle':
+        class_names = ['ddfsc', 'ldtxc']
+    else:
+        raise ValueError(f"错误的目标类型：{object_type}")
+
+    # 获取地理坐标
+    [lat0, lon0, lat1, lon1] = get_tif_corners_latlon(image_path)
+    
+    # 调用原有的核心处理函数
+    # nms_iou 默认给 0.3，切片大小 1024，重叠 128，大图阈值 4096
+    output_data = process_image(
+        model, image_path, conf, 0.3, 1024, 128, 4096,
+        class_names, output_root, lat0, lon0, lat1, lon1
+    )
+    
+    return output_data
+
+
+
 if __name__ == '__main__':
     main()
 
