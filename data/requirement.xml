@@ -12,6 +12,7 @@
         <height>512</height>
         <width>512</width>
     </slice_inputs>
+    
     <payload_types>
         <!-- <type>SAR</type> -->
         <type>OPTICAL</type>

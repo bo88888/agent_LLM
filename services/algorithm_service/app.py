@@ -175,24 +175,9 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 },
                 "confidence": 0.96
             }
-
-    except subprocess.CalledProcessError as sub_err:
-        print(f"[C++ 运行期异常崩溃]:\n{sub_err.stderr}")
-        return {"code": 500, "msg": f"C++ execution failed: {sub_err.stderr}", "data": {}, "confidence": 0.0}
-    
     except Exception as e:
-        print(f"预处理执行异常: {traceback.format_exc()}")
+        print("[ERROR] 预处理执行异常", exc_info=True)
         return {"code": 500, "msg": f"Algorithm execution failed: {str(e)}", "data": {}, "confidence": 0.0}
-
-    except Exception as e:
-        print(f"预处理执行异常: {traceback.format_exc()}")
-        return {
-            "code": 500,
-            "msg": f"Algorithm execution failed: {str(e)}",
-            "data": {},
-            "confidence": 0.0
-        }
-
 
 # ==========================================
 # 3. 电子侦察逻辑 (ELINT)
