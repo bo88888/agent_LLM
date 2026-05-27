@@ -27,3 +27,9 @@ outputs/*.json
 # TIFF 图像文件
 *.tif
 *.tiff
+
+# 训练权重
+best.pt
+*.pt
+*.pth
+*.weights
