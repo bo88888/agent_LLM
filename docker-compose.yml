@@ -1,11 +1,53 @@
-version: "3.9"
 
 services:
-  algorithm_service:
-    build: ./services/algorithm_service
-    container_name: algorithm_service
-    ports: ["8888:8000"]
+  app:
+    image: huo-infer-v8:v2
+    container_name: multi_payload_app
+    working_dir: /workspace
+    ports:
+      - "8888:8888"  
+      - "9000:9000"  
+    environment:
+      OMP_NUM_THREADS: "8"
+      PYTHONUNBUFFERED: "1"
     volumes:
-      - ./data:/app/data
-      - ./services/algorithm_service:/app
-    restart: always
+      - .:/workspace                      # 映射根目录，调度器代码热更新
+      - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
+      - ./data:/app/data                  # 映射数据目录
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+
+        # 1. 环境变量与依赖配置
+        export LD_LIBRARY_PATH="/mnt/ww/opencv460/lib64:/usr/local/lib:$${LD_LIBRARY_PATH:-}"
+        export PYTHONPATH="/workspace:/app:$${PYTHONPATH:-}"
+        python -m pip install --no-cache-dir -r /workspace/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+        # 2. 后台启动算法服务 (开启 --reload)
+        cd /app
+        chmod +x /app/myprogram || true
+        python -m uvicorn app:app --host 0.0.0.0 --port 8888 --reload --reload-dir /app &
+        api_pid=$$!
+        trap 'kill "$$api_pid" 2>/dev/null || true' EXIT
+
+        # 3. 等待算法服务就绪
+        echo "Waiting for algorithm service to start..."
+        retry_count=0
+        until python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8888/docs', timeout=2).close()" >/dev/null 2>&1; do
+          retry_count=$$((retry_count + 1))
+          if [ "$$retry_count" -ge 60 ]; then
+            echo "algorithm service not ready" >&2
+            exit 1
+          fi
+          sleep 1
+        done
+        echo "Algorithm service is ready!"
+
+        # 4. 🌟 前台启动主调度器 API (开启 --reload)
+        cd /workspace
+        # 注意：这里假设你的文件名为 main.py 且里面定义了 app = FastAPI(...)
+        python -m uvicorn main:app --host 0.0.0.0 --port 9000 --reload --reload-dir /workspace
+        
+    restart: "no"
