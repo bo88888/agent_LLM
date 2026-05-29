@@ -6,7 +6,7 @@ from typing import Dict, Any
 from fastapi import FastAPI
 from SAR_pro import process_sar_image
 from opt_pro import process_optical_rs_image
-# from Optical_detection.infer_OPT_SLD import run_optical_detection
+from Optical_detection.infer_OPT_SLD import run_optical_detection
 app = FastAPI()
 
 def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -16,15 +16,79 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ==========================================
-# 1. 视觉目标检测逻辑 (SAR 与 光学)
+# 1. 视觉目标检测逻辑 (真实算法 + 模拟兜底)
 # ==========================================
-def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict) -> dict:
+def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict, input_data: dict) -> dict:
     mode = params.get("mode", "base_map")
+    
+    # ----------------------------------------------------
+    # 1. 自动从上下文提取待检测的图片路径
+    # ----------------------------------------------------
+    tiff_path = ""
+    previous_results = input_data.get("previous_results", {})
+    
+    # 优先去上游任务（如P3几何校正）的输出结果里找精校正图
+    for res_content in previous_results.values():
+        path = res_content.get("geo_corrected_path") 
+        if path:
+            tiff_path = path
+            break
+    if not tiff_path:
+        error_msg = f"目标检测阻断：未在上下文找到几何精校正输出 (geo_corrected_path)。请检查上游 P3 任务是否成功！输入上下文: {previous_results}"
+        print(f"[错误] {error_msg}")
+        return {
+            "code": 500,
+            "msg": error_msg,
+            "data": {},
+            "confidence": 0.0
+        }
+    
+    # 确保路径是容器内的绝对路径
+    if tiff_path and not tiff_path.startswith("/"):
+        tiff_path = os.path.join("/app", tiff_path)
+
+    # ----------------------------------------------------
+    # 2. 光学船只检测接入
+    # ----------------------------------------------------
+    if tool_name == "optical_ship_service" and tiff_path and os.path.exists(tiff_path):
+        print(f"[目标检测] ⚡ 启动真实光学检测 | 模型: {tool_name} | 输入图: {tiff_path}")
+        try:
+
+            model_path = "/app/Optical_detection/best.pt"
+            output_root = os.path.join(os.path.dirname(tiff_path), "detect_results")
+            
+            # 执行真实的 YOLO 推理
+            raw_result = run_optical_detection(
+                image_path=tiff_path,
+                model_path=model_path,
+                output_root=output_root,
+                object_type='ship',
+                conf=params.get("conf", 0.2)
+            )
+            
+            # 为检测结果补充调度系统需要的业务字段
+            detections = raw_result.get("data", [])
+            for det in detections:
+                det["fusionSource"] = tool_name
+                det["auxInterpretationInfo"] = "YOLO 视觉算法检出"
+            
+            return {
+                "code": 200,
+                "msg": f"success (real detection on {os.path.basename(tiff_path)})",
+                "data": {"detections": detections},
+            }
+        except Exception as e:
+            print(f"[ERROR] 真实算法执行异常:\n{traceback.format_exc()}")
+            return {"code": 500, "msg": f"Real algorithm failed: {str(e)}", "data": {}, "confidence": 0.0}
+
+    # ----------------------------------------------------
+    # 3. ：SAR 或者 其他还没接入的检测模型，继续用随机数模拟
+    # ----------------------------------------------------
+    print(f"[目标检测] 🔄 触发模拟检测逻辑 | 模型: {tool_name}")
     lon = float(params.get("lon", 120.1))
     lat = float(params.get("lat", 30.2))
     score = round(random.uniform(0.88, 0.98), 2)
     
-    # 模拟真实的目标框大小(经纬度跨度)和中心点偏移
     hw_lon = 0.005
     hh_lat = 0.005
     center_lon = lon + random.uniform(-0.01, 0.01)
@@ -32,15 +96,11 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
     
     target_data = {
         "targetName": target_name,
-        
-        # --- 像素百分比坐标 ---
         "leftTopX": 0.15, "leftTopY": 0.15,
         "leftBotX": 0.15, "leftBotY": 0.85,
         "rightTopX": 0.85, "rightTopY": 0.15,
         "rightBotX": 0.85, "rightBotY": 0.85,
         "center_x": 0.50, "center_y": 0.50,
-        
-        # --- 真实地理坐标 (严格照应文档24字段) ---
         "leftTopLon": round(center_lon - hw_lon, 6),
         "leftTopLat": round(center_lat + hh_lat, 6),
         "leftBotLon": round(center_lon - hw_lon, 6),
@@ -51,120 +111,17 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         "rightBotYLat": round(center_lat - hh_lat, 6),
         "center_Lon": round(center_lon, 6),
         "center_Lat": round(center_lat, 6),
-        
-        # --- 业务属性 ---
         "score": score,
-        "fusionSource": tool_name,  # ★ 已将 algorithmSource 修正为 fusionSource
-        "auxInterpretationInfo": "视觉算法原始检出"
+        "fusionSource": tool_name,  
+        "auxInterpretationInfo": "模拟检测算法检出"
     }
     
     return {
         "code": 200,
-        "msg": f"success (processed in {mode} mode)",
+        "msg": f"success (mocked in {mode} mode)",
         "data": {"detections": [target_data]},
         "confidence": score  
     }
-
-
-
-
-# # ==========================================
-# # 1. 视觉目标检测逻辑 (真实算法 + 模拟兜底)
-# # ==========================================
-# def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict, input_data: dict) -> dict:
-#     mode = params.get("mode", "base_map")
-    
-#     # ----------------------------------------------------
-#     # 1. 自动从上下文提取待检测的图片路径
-#     # ----------------------------------------------------
-#     tiff_path = params.get("tiff_path", "")
-#     if not tiff_path:
-#         previous_results = input_data.get("previous_results", {})
-#         for res_content in previous_results.values():
-#             path = res_content.get("geo_corrected_path") 
-#             if path:
-#                 tiff_path = path
-#                 break
-                
-#     # 确保路径是容器内的绝对路径
-#     if tiff_path and not tiff_path.startswith("/"):
-#         tiff_path = os.path.join("/app", tiff_path)
-
-#     # ----------------------------------------------------
-#     # 2. 光学船只检测接入
-#     # ----------------------------------------------------
-#     if tool_name == "optical_ship_service" and tiff_path and os.path.exists(tiff_path):
-#         print(f"[目标检测] ⚡ 启动真实光学检测 | 模型: {tool_name} | 输入图: {tiff_path}")
-#         try:
-
-#             model_path = "/app/services/algorithm_service/Optical_detection/best.pt"
-#             output_root = os.path.join(os.path.dirname(tiff_path), "detect_results")
-            
-#             # 执行真实的 YOLO 推理
-#             raw_result = run_optical_detection(
-#                 image_path=tiff_path,
-#                 model_path=model_path,
-#                 output_root=output_root,
-#                 object_type='ship',
-#                 conf=params.get("conf", 0.2)
-#             )
-            
-#             # 为检测结果补充调度系统需要的业务字段
-#             detections = raw_result.get("data", [])
-#             for det in detections:
-#                 det["fusionSource"] = tool_name
-#                 det["auxInterpretationInfo"] = "YOLO 视觉算法检出"
-            
-#             return {
-#                 "code": 200,
-#                 "msg": f"success (real detection on {os.path.basename(tiff_path)})",
-#                 "data": {"detections": detections},
-#             }
-#         except Exception as e:
-#             print(f"[ERROR] 真实算法执行异常:\n{traceback.format_exc()}")
-#             return {"code": 500, "msg": f"Real algorithm failed: {str(e)}", "data": {}, "confidence": 0.0}
-
-#     # ----------------------------------------------------
-#     # 3. ：SAR 或者 其他还没接入的检测模型，继续用随机数模拟
-#     # ----------------------------------------------------
-#     print(f"[目标检测] 🔄 触发模拟检测逻辑 | 模型: {tool_name}")
-#     lon = float(params.get("lon", 120.1))
-#     lat = float(params.get("lat", 30.2))
-#     score = round(random.uniform(0.88, 0.98), 2)
-    
-#     hw_lon = 0.005
-#     hh_lat = 0.005
-#     center_lon = lon + random.uniform(-0.01, 0.01)
-#     center_lat = lat + random.uniform(-0.01, 0.01)
-    
-#     target_data = {
-#         "targetName": target_name,
-#         "leftTopX": 0.15, "leftTopY": 0.15,
-#         "leftBotX": 0.15, "leftBotY": 0.85,
-#         "rightTopX": 0.85, "rightTopY": 0.15,
-#         "rightBotX": 0.85, "rightBotY": 0.85,
-#         "center_x": 0.50, "center_y": 0.50,
-#         "leftTopLon": round(center_lon - hw_lon, 6),
-#         "leftTopLat": round(center_lat + hh_lat, 6),
-#         "leftBotLon": round(center_lon - hw_lon, 6),
-#         "leftBotLat": round(center_lat - hh_lat, 6),
-#         "rightTopLon": round(center_lon + hw_lon, 6),
-#         "rightTopYLat": round(center_lat + hh_lat, 6),
-#         "rightBotXLon": round(center_lon + hw_lon, 6),
-#         "rightBotYLat": round(center_lat - hh_lat, 6),
-#         "center_Lon": round(center_lon, 6),
-#         "center_Lat": round(center_lat, 6),
-#         "score": score,
-#         "fusionSource": tool_name,  
-#         "auxInterpretationInfo": "模拟检测算法检出"
-#     }
-    
-#     return {
-#         "code": 200,
-#         "msg": f"success (mocked in {mode} mode)",
-#         "data": {"detections": [target_data]},
-#         "confidence": score  
-#     }
 
 # ==========================================
 # 2. 预处理逻辑 
@@ -358,7 +315,6 @@ def infer(payload: Dict[str, Any]):
     if tool_name in {"sar_denoise_service", "optical_enhance_service", "geo_correction_service"}:
         tiff_path = params.get("tiff_path") or input_data.get("tiff_path", "")
         
-        # 强制打印调试日志：看看发进来的到底是什么
         print(f"[调试] infer 收到预处理请求: {tool_name}, tiff_path: {tiff_path}")
         
         algo_response = run_local_preprocess_model(tool_name, tiff_path, params, input_data)
@@ -370,7 +326,7 @@ def infer(payload: Dict[str, Any]):
         "optical_aircraft_service", "optical_ship_service", "optical_vehicle_service"
     }:
         target_name = tool_name.split("_")[1]
-        algo_response = call_specific_algorithm_docker(tool_name, target_name, params)
+        algo_response = call_specific_algorithm_docker(tool_name, target_name, params, input_data)
         
     # --- 3. 电子侦察模块 ---
     elif tool_name == "elint_detection_service":

@@ -59,8 +59,7 @@ async def submit_task(req: PipelineRequest):
     registry = build_registry()
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
     scheduler = SchedulerCenter(invoker)
-    
-    context = scheduler.run(context) 
+    context = await scheduler.run_async(context)
 
     # 4. 后处理与报告
     context = PostprocessAgent().run(context)

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import json
 from osgeo import gdal, osr
-
+os.environ['PROJ_LIB'] = '/opt/conda/share/proj'
 # 计算左上和右下的经纬度
 def get_tif_corners_latlon(tif_path):
     ds = gdal.Open(tif_path)

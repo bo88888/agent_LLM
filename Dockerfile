@@ -1,4 +1,4 @@
-FROM huo-infer-v8:v2
+FROM huo-infer-v8:v3
 ENV LD_LIBRARY_PATH=/mnt/ww/opencv460/lib64:/usr/local/lib:$LD_LIBRARY_PATH
 ENV OMP_NUM_THREADS=8
 ENV PYTHONUNBUFFERED=1
