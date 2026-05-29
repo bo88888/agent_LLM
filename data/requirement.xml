@@ -25,7 +25,7 @@
     </input_files>
 
     <target_classes>
-        <class>aircraft</class>
+        <class>plane</class>
         <class>ship</class>
         <class>vehicle</class>
     </target_classes>

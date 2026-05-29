@@ -14,7 +14,6 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
     parsed = input_data.get("parsed_requirement") or input_data.get("xml_config", {})
     return parsed.get("target_region", {"lon": 120.1, "lat": 30.2, "radius_km": 20})
 
-
 # ==========================================
 # 1. 视觉目标检测逻辑 (真实算法 + 模拟兜底)
 # ==========================================
@@ -22,19 +21,44 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
     mode = params.get("mode", "base_map")
     
     # ----------------------------------------------------
-    # 1. 自动从上下文提取待检测的图片路径
+    # 1. 严格从上下文提取几何精校正后的图片路径 (区分 SAR 和 光学)
     # ----------------------------------------------------
     tiff_path = ""
     previous_results = input_data.get("previous_results", {})
     
-    # 优先去上游任务（如P3几何校正）的输出结果里找精校正图
     for res_content in previous_results.values():
-        path = res_content.get("geo_corrected_path") 
-        if path:
-            tiff_path = path
+        all_corrected = res_content.get("all_corrected_results", [])
+        
+        if all_corrected:
+            # 遍历 P3 输出的所有校正图片，精准匹配载荷类型
+            for item in all_corrected:
+                orig_input = item.get("original_input", "")
+                geo_path = item.get("geo_corrected_path", "")
+                
+                # 如果当前是光学检测工具，拿光学增强后的图校正来的结果
+                if tool_name.startswith("optical_") and "optical" in orig_input:
+                    tiff_path = geo_path
+                    break
+                # 如果当前是 SAR 检测工具，拿 SAR 去噪后的图校正来的结果
+                elif tool_name.startswith("sar_") and "sar" in orig_input:
+                    tiff_path = geo_path
+                    break
+                    
+        # 如果通过上面的精准匹配找到了，就跳出大循环
+        if tiff_path:
             break
+            
+    # 如果没找到，退化尝试拿单一的 geo_corrected_path (兼容只传一张图的情况或旧版输出)
     if not tiff_path:
-        error_msg = f"目标检测阻断：未在上下文找到几何精校正输出 (geo_corrected_path)。请检查上游 P3 任务是否成功！输入上下文: {previous_results}"
+        for res_content in previous_results.values():
+            path = res_content.get("geo_corrected_path") 
+            if path:
+                tiff_path = path
+                break
+
+    # 致命拦截：如果还是没找到，直接阻断
+    if not tiff_path:
+        error_msg = f"目标检测阻断：未找到匹配当前载荷({tool_name})的几何精校正输出。输入上下文: {previous_results}"
         print(f"[错误] {error_msg}")
         return {
             "code": 500,
@@ -46,43 +70,75 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
     # 确保路径是容器内的绝对路径
     if tiff_path and not tiff_path.startswith("/"):
         tiff_path = os.path.join("/app", tiff_path)
-
+    
     # ----------------------------------------------------
-    # 2. 光学船只检测接入
+    # 2. 真实光学目标检测接入 (动态适配 ship, plane, vehicle)
     # ----------------------------------------------------
-    if tool_name == "optical_ship_service" and tiff_path and os.path.exists(tiff_path):
-        print(f"[目标检测] ⚡ 启动真实光学检测 | 模型: {tool_name} | 输入图: {tiff_path}")
+    optical_tools = ["optical_ship_service", "optical_plane_service", "optical_vehicle_service"]
+    
+    if tool_name in optical_tools and tiff_path and os.path.exists(tiff_path):
+        
+        # 建立 tool_name 到算法 object_type 和 模型权重的映射
+        algorithm_config_map = {
+            "optical_ship_service": {"type": "ship", "weight": "best_ship.pt"},
+            "optical_plane_service": {"type": "plane", "weight": "best_plane.pt"}, 
+            "optical_vehicle_service": {"type": "vehicle", "weight": "best_vehicle.pt"}
+        }
+        # 获取当前任务的配置
+        algo_config = algorithm_config_map.get(tool_name)
+        if not algo_config:
+             return {"code": 500, "msg": f"不支持的光学检测工具: {tool_name}", "data": {}, "confidence": 0.0}
+             
+        object_type = algo_config["type"]
+        
+        #  1. 动态提取载荷类型 (判断 tool_name 是 optical 开头还是 sar 开头)
+        payload_type = "optical" if tool_name.startswith("optical") else "sar"
+        
+        # 动态拼接模型路径
+        model_path = f"/app/Optical_detection/{algo_config['weight']}"
+        
+        print(f"[目标检测] ⚡ 启动真实检测 | 载荷: {payload_type} | 模型: {tool_name} | 目标: {object_type} | 图: {tiff_path}")
+        
+        # 严格检查权重文件是否存在
+        if not os.path.exists(model_path):
+            error_msg = f"未找到模型权重文件: {model_path}，请检查宿主机 Optical_detection 目录下是否有该文件！"
+            print(f"[错误] {error_msg}")
+            return {"code": 500, "msg": error_msg, "data": {}, "confidence": 0.0}
+        
         try:
-
-            model_path = "/app/Optical_detection/best.pt"
-            output_root = os.path.join(os.path.dirname(tiff_path), "detect_results")
+            # 2. 修改输出目录结构：detect_results / optical / ship
+            output_root = os.path.join(os.path.dirname(tiff_path), "detect_results", payload_type, object_type)
             
             # 执行真实的 YOLO 推理
             raw_result = run_optical_detection(
                 image_path=tiff_path,
                 model_path=model_path,
                 output_root=output_root,
-                object_type='ship',
+                object_type=object_type,
+                payload_type=payload_type, 
                 conf=params.get("conf", 0.2)
             )
-            
+         
             # 为检测结果补充调度系统需要的业务字段
             detections = raw_result.get("data", [])
             for det in detections:
                 det["fusionSource"] = tool_name
-                det["auxInterpretationInfo"] = "YOLO 视觉算法检出"
+                det["auxInterpretationInfo"] = f"YOLO 视觉算法检出 ({object_type})"
             
             return {
                 "code": 200,
                 "msg": f"success (real detection on {os.path.basename(tiff_path)})",
                 "data": {"detections": detections},
+                "confidence": 1.0
             }
+            
         except Exception as e:
             print(f"[ERROR] 真实算法执行异常:\n{traceback.format_exc()}")
             return {"code": 500, "msg": f"Real algorithm failed: {str(e)}", "data": {}, "confidence": 0.0}
 
+
     # ----------------------------------------------------
-    # 3. ：SAR 或者 其他还没接入的检测模型，继续用随机数模拟
+    # 3. ：SAR 
     # ----------------------------------------------------
     print(f"[目标检测] 🔄 触发模拟检测逻辑 | 模型: {tool_name}")
     lon = float(params.get("lon", 120.1))
@@ -122,6 +178,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         "data": {"detections": [target_data]},
         "confidence": score  
     }
+
 
 # ==========================================
 # 2. 预处理逻辑 
@@ -322,8 +379,8 @@ def infer(payload: Dict[str, Any]):
         
     # --- 2. 目标检测模块 ---
     elif tool_name in {
-        "sar_aircraft_service", "sar_ship_service", "sar_vehicle_service",
-        "optical_aircraft_service", "optical_ship_service", "optical_vehicle_service"
+        "sar_plane_service", "sar_ship_service", "sar_vehicle_service",
+        "optical_plane_service", "optical_ship_service", "optical_vehicle_service"
     }:
         target_name = tool_name.split("_")[1]
         algo_response = call_specific_algorithm_docker(tool_name, target_name, params, input_data)

@@ -95,7 +95,7 @@ def build_detection_tasks(req: dict) -> List[SubTask]:
     """根据载荷类型和目标类型生成检测阶段任务。
 
     例如：
-    - payload_types 包含 SAR，target_classes 包含 aircraft，则生成 SAR 飞机检测 D1。
+    - payload_types 包含 SAR，target_classes 包含 plane，则生成 SAR 飞机检测 D1。
     - payload_types 包含 OPTICAL，target_classes 包含 ship，则生成光学船舶检测 D5。
     """
     tasks: List[SubTask] = []
@@ -112,16 +112,16 @@ def build_detection_tasks(req: dict) -> List[SubTask]:
     geo_dep = ["P3"] if any(p in payload_types for p in ["SAR", "OPTICAL"]) else []
 
     # SAR 目标检测任务。
-    if "SAR" in payload_types and "aircraft" in target_classes:
-        tasks.append(SubTask("D1", "SAR aircraft detection", "sar_aircraft_service", dependencies=geo_dep, parameters=task_params))
+    if "SAR" in payload_types and "plane" in target_classes:
+        tasks.append(SubTask("D1", "SAR plane detection", "sar_plane_service", dependencies=geo_dep, parameters=task_params))
     if "SAR" in payload_types and "ship" in target_classes:
         tasks.append(SubTask("D2", "SAR ship detection", "sar_ship_service", dependencies=geo_dep, parameters=task_params))
     if "SAR" in payload_types and "vehicle" in target_classes:
         tasks.append(SubTask("D3", "SAR vehicle detection", "sar_vehicle_service", dependencies=geo_dep, parameters=task_params))
 
     # 光学目标检测任务。
-    if "OPTICAL" in payload_types and "aircraft" in target_classes:
-        tasks.append(SubTask("D4", "Optical aircraft detection", "optical_aircraft_service", dependencies=geo_dep, parameters=task_params))
+    if "OPTICAL" in payload_types and "plane" in target_classes:
+        tasks.append(SubTask("D4", "Optical plane detection", "optical_plane_service", dependencies=geo_dep, parameters=task_params))
     if "OPTICAL" in payload_types and "ship" in target_classes:
         tasks.append(SubTask("D5", "Optical ship detection", "optical_ship_service", dependencies=geo_dep, parameters=task_params))
     if "OPTICAL" in payload_types and "vehicle" in target_classes:

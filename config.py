@@ -21,10 +21,10 @@ TOOL_SERVICE_MAP = {
     "geo_correction_service": ALGORITHM_URL,
 
     # 目标检测
-    "sar_aircraft_service": ALGORITHM_URL,
+    "sar_plane_service": ALGORITHM_URL,
     "sar_ship_service": ALGORITHM_URL,
     "sar_vehicle_service": ALGORITHM_URL,
-    "optical_aircraft_service": ALGORITHM_URL,
+    "optical_plane_service": ALGORITHM_URL,
     "optical_ship_service": ALGORITHM_URL,
     "optical_vehicle_service": ALGORITHM_URL,
 

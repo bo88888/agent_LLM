@@ -208,7 +208,7 @@ def numpy_serializer(obj):
     raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap, large_threshold,
-                 class_names, output_root, lat0, lon0, lat1, lon1):
+                 class_names, output_root, lat0, lon0, lat1, lon1, object_type="", payload_type=""):
     image = cv2.imread(image_path)
     if image is None:
         print(f"无法读取图像: {image_path}")
@@ -217,9 +217,17 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
     all_detections = []
 
     img_name = os.path.splitext(os.path.basename(image_path))[0]
-    os.makedirs(output_root, exist_ok=True)
-    result_dir = os.path.join(output_root, get_unique_dir_name(output_root, img_name))
+
+    result_dir = output_root
     os.makedirs(result_dir, exist_ok=True)
+    name_parts = [img_name]
+    if payload_type:
+        name_parts.append(payload_type)
+    if object_type:
+        name_parts.append(object_type)
+    file_prefix = "_".join(name_parts)
+    os.makedirs(result_dir, exist_ok=True)
+
     print(f"处理图像: {image_path} (尺寸: {img_width}x{img_height})")
     print(f"结果保存至: {result_dir}")
 
@@ -228,7 +236,7 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
         print(f"切分为 {len(tiles)} 个 {tile_size}x{tile_size} 块")
 
         for tile, (x_offset, y_offset) in zip(tiles, positions):
-            results = model(tile, conf=conf_threshold)
+            results = model(tile, conf=conf_threshold, verbose=False)
 
             for result in results:
                 for obb in result.obb:
@@ -300,7 +308,7 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
                         continue
 
                     if cls_id < 0 or cls_id >= len(class_names):
-                        print(f"跳过未知类别ID: {cls_id}")
+                        # print(f"跳过未知类别ID: {cls_id}")
                         continue
 
                     all_detections.append({
@@ -313,7 +321,7 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
 
         merged = merge_detections(all_detections, img_width, img_height, nms_threshold=nms_iou)
     else:
-        results = model(image, conf=conf_threshold)
+        results = model(image, conf=conf_threshold, verbose=False)
         merged = []
         for result in results:
             for obb in result.obb:
@@ -377,7 +385,7 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
                     continue
 
                 if cls_id < 0 or cls_id >= len(class_names):
-                    print(f"跳过未知类别ID: {cls_id}")
+                    # print(f"跳过未知类别ID: {cls_id}")
                     continue
 
                 merged.append({
@@ -394,9 +402,10 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
 
     # 保存推理结果图片
     result_image = draw_rotated_boxes(image, merged, class_names)
-    result_img_path = os.path.join(result_dir, f"{img_name}_result.jpg")
+    result_img_path = os.path.join(result_dir, f"{file_prefix}_result.jpg")
     cv2.imwrite(result_img_path, result_image)
     print(f"推理图保存: {result_img_path}")
+
 
     # 构建指定格式的结果数据
     output_data = {"data": []}
@@ -455,12 +464,11 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
         output_data["data"].append(target_data)
 
     # 保存JSON结果
-    json_path = os.path.join(result_dir, f"{img_name}_detections.json")
+    json_path = os.path.join(result_dir, f"{file_prefix}_detections.json")
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, ensure_ascii=False, indent=4, default=numpy_serializer)
     print(f"JSON结果保存: {json_path}")
     print("-" * 50)
-
     return output_data
 
 def main():
@@ -530,11 +538,7 @@ def main():
     print("\n推理结果汇总:")
     print(json.dumps(all_results, ensure_ascii=False, indent=2, default=numpy_serializer))
 
-# ==========================================
-# 新增：提供给 app.py 调用的对外接口
-# ==========================================
-def run_optical_detection(image_path, model_path, output_root, object_type='ship', conf=0.2):
-    # 初始化模型
+def run_optical_detection(image_path, model_path, output_root, object_type, payload_type='optical', conf=0.2):
     model = YOLO(model_path)
     
     # 获取类别
@@ -560,11 +564,10 @@ def run_optical_detection(image_path, model_path, output_root, object_type='ship
     # nms_iou 默认给 0.3，切片大小 1024，重叠 128，大图阈值 4096
     output_data = process_image(
         model, image_path, conf, 0.3, 1024, 128, 4096,
-        class_names, output_root, lat0, lon0, lat1, lon1
+        class_names, output_root, lat0, lon0, lat1, lon1, object_type, payload_type
     )
     
     return output_data
-
 
 
 if __name__ == '__main__':
@@ -573,8 +576,4 @@ if __name__ == '__main__':
 
 
 # python infer_OPT_SLD.py --model_path /home/air/Code/SLD_Yolo/Opt/runs/silei_ship_obb/weights/best.pt --source datasets/test_img/ --output_root infer_results --object_type ship
-
-
-
-
 

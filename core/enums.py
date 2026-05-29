@@ -22,7 +22,7 @@ class TargetClass(str, Enum):
     """支持的目标类别枚举。"""
 
     # 飞机目标。
-    AIRCRAFT = "aircraft"
+    PLANE = "plane"
 
     # 船舶目标。
     SHIP = "ship"

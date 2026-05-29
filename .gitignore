@@ -33,3 +33,5 @@ best.pt
 *.pt
 *.pth
 *.weights
+
+*.jpg
