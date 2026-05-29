@@ -2,8 +2,8 @@ import json
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from pathlib import Path
 
-# 导入你现有的模块
 from core.schema import ExecutionContext, TaskRequest
 from agents.input_agent import InputAgent
 from agents.understanding_agent import UnderstandingAgent
@@ -65,6 +65,11 @@ async def submit_task(req: PipelineRequest):
     context = PostprocessAgent().run(context)
     context = ReportAgent().run(context)
 
+    output_dir = Path("outputs")
+    output_dir.mkdir(exist_ok=True)  
+    report_path = output_dir / f"report_{req.task_id}.json"
+    print(f"✅ 报告已成功保存至容器内部路径: {report_path}")
+
     # 5. 直接将最终的 json 报告作为 HTTP 响应返回给前端！
     return {
         "code": 200,
@@ -74,6 +79,7 @@ async def submit_task(req: PipelineRequest):
             "quality_report": context.quality_report
         }
     }
+
 
 if __name__ == "__main__":
     import uvicorn
