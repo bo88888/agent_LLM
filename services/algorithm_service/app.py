@@ -122,8 +122,12 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             # 为检测结果补充调度系统需要的业务字段
             detections = raw_result.get("data", [])
             for det in detections:
+                original_class = det.get("targetName", "unknown")
+                det["targetName"] = object_type
                 det["fusionSource"] = tool_name
-                det["auxInterpretationInfo"] = f"YOLO 视觉算法检出 ({object_type})"
+                det["fusionBasis"] = "视觉特征识别"     # 融合依据
+                det["fusionInfo"] = "单源独立检出"       # 融合信息
+                det["auxInterpretationInfo"] = f"YOLO 视觉算法检出 (细分类: {original_class})" # 辅助判读信息
             
             return {
                 "code": 200,
