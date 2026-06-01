@@ -379,7 +379,7 @@ def infer(payload: Dict[str, Any]):
         
         algo_response = run_local_preprocess_model(tool_name, tiff_path, params, input_data)
 
-        
+
     # --- 2. 目标检测模块 ---
     elif tool_name in {
         "sar_plane_service", "sar_ship_service", "sar_vehicle_service",
@@ -403,4 +403,39 @@ def infer(payload: Dict[str, Any]):
         }
     
     # 最后统一包装返回给调度器
+    return build_mcp_response(subtask_id, tool_name, algo_response)
+
+
+@app.post("/slice_infer")
+
+def slice_infer_endpoint(payload: Dict[str, Any]):
+    tool_name = payload.get("tool_name", "")
+    subtask_id = payload.get("subtask_id", "")
+    params = payload.get("parameters", {})
+    slice_paths = params.get("pointPathList", [])
+    all_detections = []
+
+    try:
+        for idx, path in enumerate(slice_paths):
+            all_detections.append({
+                "targetName": "minchuan",
+                "confidence": 0.95,
+                "source_image": os.path.basename(path), 
+                "fusionSource": tool_name,
+                "fusionBasis": "切片视觉特征识别",
+                "fusionInfo": "单源独立检出",
+                "auxInterpretationInfo": "切片专属算法批量检出"
+            })
+            
+        algo_response = {
+            "code": 200,
+            "msg": f"batch success ({len(slice_paths)} images)",
+            "data": {"detections": all_detections},
+            "confidence": 1.0
+        }
+        
+    except Exception as e:
+        print(f"[ERROR] 批量执行异常:\n{traceback.format_exc()}")
+        algo_response = {"code": 500, "msg": f"Batch failed: {str(e)}", "data": {}, "confidence": 0.0}
+
     return build_mcp_response(subtask_id, tool_name, algo_response)

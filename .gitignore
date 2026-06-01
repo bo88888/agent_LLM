@@ -1,4 +1,4 @@
-# Python 字节码/缓存文件（核心：忽略所有__pycache__目录）
+# Python 字节码/缓存文件
 __pycache__/
 *.py[cod]
 *$py.class
@@ -15,7 +15,7 @@ ENV/
 *.swp
 *.swo
 
-# 输出文件（保留目录结构，忽略具体报告）
+# 输出文件
 outputs/*.json
 !outputs/.gitkeep
 

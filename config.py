@@ -13,7 +13,7 @@ HTTP_TIMEOUT = 300
 QUALITY_THRESHOLD = 0.75
 
 ALGORITHM_URL = "http://127.0.0.1:8888/infer"
-
+SLICE_ALGORITHM_URL = "http://127.0.0.1:8888/slice_infer"
 TOOL_SERVICE_MAP = {
     # 预处理
     "sar_denoise_service": ALGORITHM_URL,
@@ -30,4 +30,7 @@ TOOL_SERVICE_MAP = {
 
     # 电子侦察
     "elint_detection_service": ALGORITHM_URL,
+    
+    #切片识别
+    "slice_detection_service": SLICE_ALGORITHM_URL
 }

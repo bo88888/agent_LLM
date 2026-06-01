@@ -4,7 +4,6 @@ from core.schema import SubTask
 
 def build_preprocess_tasks(req: dict) -> List[SubTask]:
     """根据载荷类型生成预处理阶段任务。
-
     router.py 的职责是“生成任务图”，不负责执行任务。
     每个 SubTask 只描述：
     - subtask_id: 子任务编号。
@@ -13,6 +12,7 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
     - dependencies: 当前任务依赖哪些前置任务。
     - parameters: 调用服务时额外传入的参数。
     """
+
     tasks: List[SubTask] = []
     # 1. 提取需求数据
     payload_types = req.get("payload_types", [])
@@ -22,7 +22,7 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
     # 2. 根据识别模式构造专属参数字典
     base_params = {"mode": mode}
     if mode == "slice":
-        base_params.update(req.get("slice_inputs", {}))
+        return []
 
     actual_geo_deps = []
     # 如果任务需求里包含 SAR 载荷，则添加 SAR 去噪任务。
@@ -81,7 +81,7 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
                 subtask_id="P3",
                 name="Geo correction",
                 tool_name="geo_correction_service",
-                dependencies=actual_geo_deps,  # 🌟 动态绑定！可能是 ["P1"], ["P2"] 或 ["P1", "P2"]
+                dependencies=actual_geo_deps,  
                 parameters=p3_params,
             )
         )
@@ -92,24 +92,32 @@ def build_preprocess_tasks(req: dict) -> List[SubTask]:
  
 
 def build_detection_tasks(req: dict) -> List[SubTask]:
-    """根据载荷类型和目标类型生成检测阶段任务。
-
-    例如：
-    - payload_types 包含 SAR，target_classes 包含 plane，则生成 SAR 飞机检测 D1。
-    - payload_types 包含 OPTICAL，target_classes 包含 ship，则生成光学船舶检测 D5。
-    """
+  
     tasks: List[SubTask] = []
-    # 1. 提取需求数据
+    mode = req.get("detection_mode", "base_map")
+
+    # 切片识别
+    if mode == "slice":
+        print("[路由提示] 当前为切片识别模式，调度切片专属算法。")
+        task_params = {"mode": "slice"}
+        task_params.update(req.get("slice_inputs", {}))
+
+        return [
+            SubTask(
+                subtask_id="SLICE_01",
+                name="Slice Optical Detection",
+                tool_name="slice_detection_service", 
+                dependencies=[], 
+                parameters=task_params
+            )
+        ]
+    # 底图识别
     payload_types = req.get("payload_types", [])
     target_classes = req.get("target_classes", [])
-    mode = req.get("detection_mode", "base_map")
-    # 2. 根据识别模式构造专属参数字典
-    if mode == "base_map":
-        task_params = {"mode": "base_map", "tiff_path": req.get("tiff_path", "")}
-    else:
-        task_params = {"mode": "slice", **req.get("slice_inputs", {})}
 
+    task_params = {"mode": "base_map", "tiff_path": req.get("tiff_path", "")}
     geo_dep = ["P3"] if any(p in payload_types for p in ["SAR", "OPTICAL"]) else []
+
 
     # SAR 目标检测任务。
     if "SAR" in payload_types and "plane" in target_classes:
