@@ -2,12 +2,11 @@
 services:
   app:
     image: huo-infer-v8:v3
-    pull_policy: never
     container_name: multi_payload_app
     working_dir: /workspace
     ports:
       - "8888:8888"  
-      - "9011:9000"  
+      - "9000:9000"  
     environment:
       OMP_NUM_THREADS: "8"
       PYTHONUNBUFFERED: "1"
@@ -15,8 +14,6 @@ services:
       - .:/workspace                      # 映射根目录，调度器代码热更新
       - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
       - ./data:/app/data                  # 映射数据目录
-      - ./outputs:/workspace/outputs
-      
     command:
       - /bin/sh
       - -c
@@ -48,9 +45,9 @@ services:
         done
         echo "Algorithm service is ready!"
 
-        # 4. 前台启动主调度器 API (开启 --reload)
+        # 4.  前台启动主调度器 API (开启 --reload)
         cd /workspace
         # 注意：这里假设你的文件名为 main.py 且里面定义了 app = FastAPI(...)
-        python -m uvicorn api_main:app --host 0.0.0.0 --port 9000 --reload --reload-dir /workspace
+        python -m uvicorn main:app --host 0.0.0.0 --port 9000 --reload --reload-dir /workspace
         
     restart: "no"
