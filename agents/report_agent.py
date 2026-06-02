@@ -13,9 +13,13 @@ class ReportAgent:
                 "subtask_id": task.subtask_id,
                 "name": task.name,
                 "tool_name": task.tool_name,
+                "stage": task.stage,
                 "status": task.status.value,
                 "retry_count": task.retry_count,
                 "dependencies": task.dependencies,
+                "reason": task.reason,
+                "optional": task.optional,
+                "skip_reason": task.skip_reason,
                 "message": context.metadata.get(f"error_{task.subtask_id}")
                 or context.metadata.get(f"last_error_{task.subtask_id}")
                 or context.metadata.get(f"blocked_{task.subtask_id}", {}).get("reason", ""),
@@ -27,6 +31,8 @@ class ReportAgent:
                 blocked_info = context.metadata.get(f"blocked_{task.subtask_id}", {})
                 deps = ",".join(blocked_info.get("dependencies", []))
                 issues.append(f"{task.subtask_id} blocked by dependency: {deps}")
+            elif task.status.value == "SKIPPED" and not task.optional:
+                issues.append(f"{task.subtask_id} skipped")
 
         for subtask_id, result in context.tool_results.items():
             if not result.success and f"{subtask_id} failed" not in issues:
@@ -54,6 +60,12 @@ class ReportAgent:
             "pass": context.quality_report.get("pass", False),
             "issues": context.quality_report.get("issues", []),
             "tasks": context.quality_report.get("task_summary", []),
+        }
+        report_data["orchestration"] = {
+            "plan": context.plan_rationale,
+            "trace": context.execution_trace,
+            "replan_events": context.replan_events,
+            "skipped": context.skipped_tools,
         }
 
         context.final_report = report_data

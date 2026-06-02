@@ -34,7 +34,7 @@ class TargetClass(str, Enum):
 class TaskStatus(str, Enum):
     """子任务执行状态枚举。
 
-    SchedulerCenter 会根据工具服务调用结果更新这些状态。
+    IntelligentScheduler 会根据工具服务调用结果更新这些状态。
     """
 
     # 等待执行。
@@ -51,3 +51,6 @@ class TaskStatus(str, Enum):
 
     # 因依赖任务失败或不存在而被阻塞。
     BLOCKED = "BLOCKED"
+
+    # 可选任务在失败重规划后被跳过。
+    SKIPPED = "SKIPPED"

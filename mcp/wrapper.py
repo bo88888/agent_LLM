@@ -47,6 +47,12 @@ class MCPWrapper:
 
                 # 调度过程中的辅助信息，例如输入校验、重试、阻塞原因等。
                 "metadata": context.metadata,
+                "orchestration": {
+                    "stage": subtask.stage,
+                    "capability_id": subtask.capability_id,
+                    "reason": subtask.reason,
+                    "optional": subtask.optional,
+                },
             },
             # 当前子任务的参数，例如 {"target_resolution": "2m"}。
             parameters=subtask.parameters,

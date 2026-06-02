@@ -1,21 +1,19 @@
 import json
 import uuid
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from pathlib import Path
 
 from core.schema import ExecutionContext, TaskRequest
-from agents.input_agent import InputAgent
-from agents.understanding_agent import UnderstandingAgent
-from agents.decompose_agent import DecomposeAgent
-from agents.planning_agent import PlanningAgent
+from agents.orchestrator_agent import OrchestratorAgent
 from agents.postprocess_agent import PostprocessAgent
+from agents.replan_agent import ReplanDecisionAgent
 from agents.report_agent import ReportAgent
 from config import HTTP_TIMEOUT, TOOL_SERVICE_MAP
 from mcp.registry import ToolRegistry
 from agents.invoker_agent import InvokerAgent
-from scheduler.scheduler_center import SchedulerCenter
+from scheduler.scheduler_center import IntelligentScheduler
 
 app = FastAPI(title="智能体多载荷调度中心 API")
 
@@ -24,6 +22,15 @@ def build_registry() -> ToolRegistry:
     for tool_name, service_url in TOOL_SERVICE_MAP.items():
         registry.register(tool_name, service_url)
     return registry
+
+
+def build_orchestration_payload(context: ExecutionContext) -> Dict[str, Any]:
+    return {
+        "plan": context.plan_rationale,
+        "trace": context.execution_trace,
+        "replan_events": context.replan_events,
+        "skipped": context.skipped_tools,
+    }
 
 # 定义前端传过来的数据结构
 class PipelineRequest(BaseModel):
@@ -51,16 +58,14 @@ async def submit_task(req: PipelineRequest):
 
     context = ExecutionContext(request=request)
 
-    # 2. 依次执行你的 Agent 流水线
-    context = InputAgent().run(context)
-    context = UnderstandingAgent().run(context)
-    context = DecomposeAgent().run(context)
-    context = PlanningAgent().run(context)
-
-    # 3. 调度执行
     registry = build_registry()
+
+    # 2. 规则型 Orchestrator 持有完整上下文，完成理解、动态拆解和可解释规划。
+    context = OrchestratorAgent(registry).prepare(context)
+
+    # 3. 智能调度执行：并发、重试、失败路由和结构化轨迹。
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
-    scheduler = SchedulerCenter(invoker)
+    scheduler = IntelligentScheduler(invoker, ReplanDecisionAgent())
     context = await scheduler.run_async(context)
 
     # 4. 后处理与报告
@@ -81,7 +86,8 @@ async def submit_task(req: PipelineRequest):
         "msg": "Pipeline executed successfully",
         "data": {
             "final_report": context.final_report,
-            "quality_report": context.quality_report
+            "quality_report": context.quality_report,
+            "orchestration": build_orchestration_payload(context),
         }
     }
 
@@ -106,30 +112,27 @@ async def slice_infer(req: SliceRequest):
         output_requirements={"format": "json"},
     )
     context = ExecutionContext(request=request)
-    # 2. 前置智能体读取 XML
-    context = InputAgent().run(context)
-    context = UnderstandingAgent().run(context)
 
-    if context.parsed_requirement:
-        context.parsed_requirement["detection_mode"] = "slice"
-        # 把前端传来的整个数组，挂载到 slice_inputs 下面
-        context.parsed_requirement["slice_inputs"] = {"pointPathList": req.pointPath}
-        if "constraints" not in context.parsed_requirement:
-            context.parsed_requirement["constraints"] = {}
-        context.parsed_requirement["constraints"]["need_geo_correction"] = False
-
-    # 3. 拆解与规划 (DecomposeAgent 会把 pointPathList 提取出来写进 SubTask 的 parameters 里)
-    context = DecomposeAgent().run(context)
-    context = PlanningAgent().run(context)
-
-    # 4. 执行调度 
     registry = build_registry()
+
+    # 2. 通过 Orchestrator 注入切片模式覆盖项，再动态生成切片 DAG。
+    context = OrchestratorAgent(registry).prepare(
+        context,
+        overrides={
+            "detection_mode": "slice",
+            "slice_inputs": {"pointPathList": req.pointPath},
+            "constraints": {"need_geo_correction": False},
+        },
+    )
+
+    # 3. 执行智能调度
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
-    scheduler = SchedulerCenter(invoker)
+    scheduler = IntelligentScheduler(invoker, ReplanDecisionAgent())
     context = await scheduler.run_async(context)
 
-    # 5. 后处理提取目标数据
+    # 4. 后处理提取目标数据，并生成质量评估。
     context = PostprocessAgent().run(context)
+    context = ReportAgent().run(context)
     all_extracted_targets = context.metadata.get("fused_targets", [])
     output_dir = Path("outputs")
     output_dir.mkdir(parents=True, exist_ok=True)  
@@ -138,7 +141,9 @@ async def slice_infer(req: SliceRequest):
     final_response = {
         "code": 200,
         "msg": f"success, batch processed {len(req.pointPath)} slices",
-        "data": all_extracted_targets
+        "data": all_extracted_targets,
+        "quality_report": context.quality_report,
+        "orchestration": build_orchestration_payload(context),
     }
 
     with open(report_path, "w", encoding="utf-8") as f:
