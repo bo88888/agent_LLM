@@ -14,17 +14,23 @@ class InvokerAgent:
         self.client = AsyncHTTPClient(timeout=timeout)# 异步HTTP客户端
 
     def output_schema(self, tool_name: str) -> List[str]:
+        try:
+            return list(self.registry.get_capability(tool_name).output_schema)
+        except KeyError:
+            pass
+
         schema_map: Dict[str, List[str]] = {
             "sar_denoise_service": ["sar_denoised_path"],
             "optical_enhance_service": ["optical_enhanced_path"],
             "geo_correction_service": ["geo_corrected_path", "target_resolution"],
-            "sar_aircraft_service": ["detections"],
+            "sar_plane_service": ["detections"],
             "sar_ship_service": ["detections"],
             "sar_vehicle_service": ["detections"],
-            "optical_aircraft_service": ["detections"],
+            "optical_plane_service": ["detections"],
             "optical_ship_service": ["detections"],
             "optical_vehicle_service": ["detections"],
             "elint_detection_service": ["detections"],
+            "slice_detection_service": ["detections"],
         }
         return schema_map.get(tool_name, [])
 
