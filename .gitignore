@@ -18,6 +18,7 @@ ENV/
 # 输出文件
 outputs/*.json
 !outputs/.gitkeep
+data/**/*.json
 
 # 临时文件
 *.log
@@ -35,3 +36,4 @@ best.pt
 *.weights
 
 *.jpg
+data/sample_packet/detect_results/**/*.json
