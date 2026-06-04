@@ -63,8 +63,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         return {
             "code": 500,
             "msg": error_msg,
-            "data": {},
-            "confidence": 0.0
+            "data": {}
         }
     
     # 确保路径是容器内的绝对路径
@@ -87,7 +86,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         # 获取当前任务的配置
         algo_config = algorithm_config_map.get(tool_name)
         if not algo_config:
-             return {"code": 500, "msg": f"不支持的光学检测工具: {tool_name}", "data": {}, "confidence": 0.0}
+             return {"code": 500, "msg": f"不支持的光学检测工具: {tool_name}", "data": {}}
              
         object_type = algo_config["type"]
         
@@ -103,7 +102,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         if not os.path.exists(model_path):
             error_msg = f"未找到模型权重文件: {model_path}，请检查宿主机 Optical_detection 目录下是否有该文件！"
             print(f"[错误] {error_msg}")
-            return {"code": 500, "msg": error_msg, "data": {}, "confidence": 0.0}
+            return {"code": 500, "msg": error_msg, "data": {}}
         
         try:
             # 2. 修改输出目录结构：detect_results / optical / ship
@@ -131,13 +130,12 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             return {
                 "code": 200,
                 "msg": f"success (real detection on {os.path.basename(tiff_path)})",
-                "data": {"detections": detections},
-                "confidence": 1.0
+                "data": {"detections": detections}
             }
             
         except Exception as e:
             print(f"[ERROR] 真实算法执行异常:\n{traceback.format_exc()}")
-            return {"code": 500, "msg": f"Real algorithm failed: {str(e)}", "data": {}, "confidence": 0.0}
+            return {"code": 500, "msg": f"Real algorithm failed: {str(e)}", "data": {}}
 
 
     # ----------------------------------------------------
@@ -178,8 +176,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
     return {
         "code": 200,
         "msg": f"success (mocked in {mode} mode)",
-        "data": {"detections": [target_data]},
-        "confidence": score  
+        "data": {"detections": [target_data]}
     }
 
 
@@ -189,7 +186,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
 def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, input_data: dict) -> dict:
     if tool_name in {"sar_denoise_service", "optical_enhance_service"}:
         if not tiff_path or not os.path.exists(tiff_path):
-            return {"code": 404, "msg": "文件不存在", "data": {}, "confidence": 0.0}
+            return {"code": 404, "msg": "文件不存在", "data": {}}
         
     base_dir = os.path.dirname(tiff_path) if tiff_path else ""
     base_name = os.path.basename(tiff_path) if tiff_path else ""
@@ -213,8 +210,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             return {
                 "code": 200,
                 "msg": "SAR denoise finished (Real)",
-                "data": {"sar_denoised_path": output_sar},
-                "confidence": 0.95
+                "data": {"sar_denoised_path": output_sar}
             }
             
         elif tool_name == "optical_enhance_service":
@@ -233,8 +229,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             return {
                 "code": 200,
                 "msg": "Optical enhancement finished (Real)",
-                "data": {"optical_enhanced_path": output_opt},
-                "confidence": 0.94
+                "data": {"optical_enhanced_path": output_opt}
             }
         elif tool_name == "geo_correction_service":
             print(f"[调试] P3 已进入 geo_correction_service，input_data: {input_data.keys()}")
@@ -247,7 +242,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 if path: images_to_correct.append(path)
             
             if not images_to_correct:
-                return {"code": 500, "msg": "未找到待校正图片", "data": {}, "confidence": 0.0}
+                return {"code": 500, "msg": "未找到待校正图片", "data": {}}
 
             exe_path = "/app/myprogram"
             corrected_results = []
@@ -272,12 +267,12 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 
                 if result.returncode != 0:
                     error_detail = (result.stderr or result.stdout or f"exit code {result.returncode}").strip()
-                    return {"code": 500, "msg": f"C++ failed: {error_detail[:100]}", "data": {}, "confidence": 0.0}
+                    return {"code": 500, "msg": f"C++ failed: {error_detail[:100]}", "data": {}}
                 
                 if os.path.exists(cpp_default_output):
                     os.rename(cpp_default_output, final_geo_path)
                 else:
-                    return {"code": 500, "msg": "C++运行成功但未找到默认输出文件", "data": {}, "confidence": 0.0}
+                    return {"code": 500, "msg": "C++运行成功但未找到默认输出文件", "data": {}}
 
                 corrected_results.append({
                     "original_input": source_image_path,
@@ -291,12 +286,11 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                     "geo_corrected_path": corrected_results[-1]["geo_corrected_path"],
                     "all_corrected_results": corrected_results,
                     "target_resolution": params.get("target_resolution", "2m")
-                },
-                "confidence": 0.96
+                }
             }
     except Exception as e:
         print("[ERROR] 预处理执行异常", exc_info=True)
-        return {"code": 500, "msg": f"Algorithm execution failed: {str(e)}", "data": {}, "confidence": 0.0}
+        return {"code": 500, "msg": f"Algorithm execution failed: {str(e)}", "data": {}}
 
 # ==========================================
 # 3. 电子侦察逻辑 (ELINT)
@@ -343,23 +337,21 @@ def run_elint_detection(region: dict) -> dict:
     return {
         "code": 200, 
         "msg": "ELINT detection finished", 
-        "data": {"detections": [target_data]}, 
-        "confidence": score
+        "data": {"detections": [target_data]}
     }
 
 # ==========================================
 # 4. MCP 格式封装 
 # ==========================================
 def build_mcp_response(subtask_id: str, tool_name: str, algo_response: dict) -> dict:
-
-    return {
+    response = {
         "subtask_id": subtask_id,
         "tool_name": tool_name,
         "success": algo_response.get("code") == 200,
         "output": algo_response.get("data", {}),         
-        "confidence": algo_response.get("confidence", 0.0), 
         "message": algo_response.get("msg") or f"{tool_name} 处理完成"
     }
+    return response
 
 # ==========================================
 # 5. 统一路由入口
@@ -398,8 +390,7 @@ def infer(payload: Dict[str, Any]):
         algo_response = {
             "code": 404, 
             "msg": "Tool not found in inference service", 
-            "data": {}, 
-            "confidence": 0.0
+            "data": {}
         }
     
     # 最后统一包装返回给调度器
@@ -419,7 +410,7 @@ def slice_infer_endpoint(payload: Dict[str, Any]):
         for idx, path in enumerate(slice_paths):
             all_detections.append({
                 "targetName": "minchuan",
-                "confidence": 0.95,
+                "score": 0.95,
                 "source_image": os.path.basename(path), 
                 "fusionSource": tool_name,
                 "fusionBasis": "切片视觉特征识别",
@@ -430,12 +421,11 @@ def slice_infer_endpoint(payload: Dict[str, Any]):
         algo_response = {
             "code": 200,
             "msg": f"batch success ({len(slice_paths)} images)",
-            "data": {"detections": all_detections},
-            "confidence": 1.0
+            "data": {"detections": all_detections}
         }
         
     except Exception as e:
         print(f"[ERROR] 批量执行异常:\n{traceback.format_exc()}")
-        algo_response = {"code": 500, "msg": f"Batch failed: {str(e)}", "data": {}, "confidence": 0.0}
+        algo_response = {"code": 500, "msg": f"Batch failed: {str(e)}", "data": {}}
 
     return build_mcp_response(subtask_id, tool_name, algo_response)

@@ -49,8 +49,8 @@ class AsyncHTTPClient:
             tool_name=data["tool_name"],
             success=data["success"],
             output=data["output"],
-            confidence=data.get("confidence", 0.0),
             message=data.get("message", ""),
+            confidence=data.get("confidence"),
         )
 
     async def gather(self, coroutines: Iterable[Any]):

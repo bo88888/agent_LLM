@@ -38,7 +38,7 @@ class PipelineRequest(BaseModel):
     tiff_path: str
     requirement_xml_path: str
 
-    output_requirements: Dict[str, Any] = {"format": "json", "need_confidence": True}
+    output_requirements: Dict[str, Any] = {"format": "json"}
 
 # 接口一：原来的全域底图识别接口 
 @app.post("/api/v1/task/submit")

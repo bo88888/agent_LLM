@@ -43,14 +43,12 @@ def infer(payload: dict):
             "subtask_id": payload.get("subtask_id", ""),
             "tool_name": tool_name,
             "success": True,
-            "output": {"status": "ok"},
-            "confidence": 0.95
+            "output": {"status": "ok"}
         }
 
     return {
         "subtask_id": payload.get("subtask_id", ""),
         "tool_name": tool_name,
         "success": True,
-        "output": {"detections": [build_detection(tool_name, params)]},
-        "confidence": 0.92
+        "output": {"detections": [build_detection(tool_name, params)]}
     }

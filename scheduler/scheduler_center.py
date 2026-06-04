@@ -105,7 +105,6 @@ class IntelligentScheduler:
             tool_name=task.tool_name,
             success=False,
             output={},
-            confidence=0.0,
             message=message,
         )
 
@@ -325,14 +324,14 @@ class IntelligentScheduler:
                 if result.success:
                     context.tool_results[task.subtask_id] = result
                     task.status = TaskStatus.SUCCESS
-                    self._record_trace(
-                        context,
-                        "task_succeeded",
-                        subtask_id=task.subtask_id,
-                        tool_name=task.tool_name,
-                        confidence=result.confidence,
-                        message=result.message,
-                    )
+                    payload = {
+                        "subtask_id": task.subtask_id,
+                        "tool_name": task.tool_name,
+                        "message": result.message,
+                    }
+                    if result.confidence is not None:
+                        payload["confidence"] = result.confidence
+                    self._record_trace(context, "task_succeeded", **payload)
                 else:
                     self._handle_failure(context, task, result.message)
 

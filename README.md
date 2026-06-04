@@ -80,8 +80,7 @@ POST /api/v1/task/submit
   "tiff_path": "/app/data/sample_packet/base_map.tif",
   "requirement_xml_path": "/workspace/data/requirement.xml",
   "output_requirements": {
-    "format": "json",
-    "need_confidence": true
+    "format": "json"
   }
 }
 ```
@@ -182,8 +181,9 @@ POST /api/v1/task/slice_infer
 - `tool_name`
 - `success`
 - `output`
-- `confidence`
 - `message`
+
+说明：任务级 `confidence` 不是必填字段。当前预处理、几何校正和普通工具响应不会强制返回它；检测框自己的 `score` 或算法内部 `confidence` 保留在 `output.detections` 内。
 
 ### `ExecutionContext`
 
@@ -481,7 +481,6 @@ D6: optical_vehicle_service
   "output": {
     "detections": []
   },
-  "confidence": 0.95,
   "message": "success"
 }
 ```
@@ -585,7 +584,6 @@ D6: optical_vehicle_service
 
   <output_requirements>
     <format>json</format>
-    <need_confidence>true</need_confidence>
     <need_suggestion>true</need_suggestion>
   </output_requirements>
 

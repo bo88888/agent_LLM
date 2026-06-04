@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from core.enums import TaskStatus
 
@@ -94,11 +94,11 @@ class ToolResult:
     # 工具服务实际输出。
     output: Dict[str, Any]
 
-    # 服务返回的置信度。
-    confidence: float = 0.0
-
     # 服务返回的说明信息或错误原因。
     message: str = ""
+
+    # 可选任务级置信度。不是每个工具都需要返回该字段。
+    confidence: Optional[float] = None
 
 
 @dataclass

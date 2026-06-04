@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 """MCP 协议数据结构。
@@ -62,8 +62,8 @@ class MCPResponse:
     # 算法输出主体，例如 {"detections": [...]} 或 {"fused_targets": [...]}。
     output: Dict[str, Any]
 
-    # 结果置信度，范围通常是 0.0-1.0。
-    confidence: float
-
     # 可选说明文本，常用于成功提示或失败原因。
     message: str = ""
+
+    # 可选结果置信度。只有检测/识别类工具确实返回任务级置信度时才填写。
+    confidence: Optional[float] = None

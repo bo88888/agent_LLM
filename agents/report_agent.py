@@ -2,9 +2,7 @@ from core.schema import ExecutionContext
 from services.postprocess_service.processor import build_final_report
 
 class ReportAgent:
-    """最终报告整理智能体（本地生成报告并评估系统质量）。"""
     def _assess_quality(self, context: ExecutionContext, threshold: float = 0.75) -> dict:
-        """内部方法：对网络调度的执行结果做质量评估"""
         issues = []
         task_summary = []
 
