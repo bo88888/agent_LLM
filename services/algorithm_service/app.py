@@ -15,7 +15,7 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
     return parsed.get("target_region", {"lon": 120.1, "lat": 30.2, "radius_km": 20})
 
 # ==========================================
-# 1. 视觉目标检测逻辑 (真实算法 + 模拟兜底)
+# 1. 视觉目标检测逻辑
 # ==========================================
 def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict, input_data: dict) -> dict:
     mode = params.get("mode", "base_map")
@@ -71,27 +71,49 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         tiff_path = os.path.join("/app", tiff_path)
     
     # ----------------------------------------------------
-    # 2. 真实光学目标检测接入 (动态适配 ship, plane, vehicle)
+    # 2. 真实视觉目标检测接入 (动态适配 SAR/光学 + ship/plane/vehicle)
     # ----------------------------------------------------
-    optical_tools = ["optical_ship_service", "optical_plane_service", "optical_vehicle_service"]
-    
-    if tool_name in optical_tools and tiff_path and os.path.exists(tiff_path):
-        
-        # 建立 tool_name 到算法 object_type 和 模型权重的映射
-        algorithm_config_map = {
-            "optical_ship_service": {"type": "ship", "weight": "best_ship.pt"},
-            "optical_plane_service": {"type": "plane", "weight": "best_plane.pt"}, 
-            "optical_vehicle_service": {"type": "vehicle", "weight": "best_vehicle.pt"}
-        }
+    algorithm_config_map = {
+        "optical_ship_service": {
+            "payload": "optical",
+            "type": "ship",
+            "weight": "best_ship.pt",
+        },
+        "optical_plane_service": {
+            "payload": "optical",
+            "type": "plane",
+            "weight": "best_plane.pt",
+        },
+        "optical_vehicle_service": {
+            "payload": "optical",
+            "type": "vehicle",
+            "weight": "best_vehicle.pt",
+        },
+        "sar_ship_service": {
+            "payload": "sar",
+            "type": "ship",
+            "weight": "best_sar_ship.pt",
+        },
+        "sar_plane_service": {
+            "payload": "sar",
+            "type": "plane",
+            "weight": "best_sar_plane.pt",
+        },
+        "sar_vehicle_service": {
+            "payload": "sar",
+            "type": "vehicle",
+            "weight": "best_sar_vehicle.pt",
+        },
+    }
+
+    if tool_name in algorithm_config_map and tiff_path and os.path.exists(tiff_path):
         # 获取当前任务的配置
         algo_config = algorithm_config_map.get(tool_name)
         if not algo_config:
-             return {"code": 500, "msg": f"不支持的光学检测工具: {tool_name}", "data": {}}
+             return {"code": 500, "msg": f"不支持的视觉检测工具: {tool_name}", "data": {}}
              
         object_type = algo_config["type"]
-        
-        #  1. 动态提取载荷类型 (判断 tool_name 是 optical 开头还是 sar 开头)
-        payload_type = "optical" if tool_name.startswith("optical") else "sar"
+        payload_type = algo_config["payload"]
         
         # 动态拼接模型路径
         model_path = f"/app/Optical_detection/{algo_config['weight']}"
@@ -123,9 +145,9 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             for det in detections:
 
                 det["fusionSource"] = tool_name
-                det["fusionBasis"] = "视觉特征识别"     # 融合依据
+                det["fusionBasis"] = f"{payload_type.upper()}视觉特征识别"    
                 det["fusionInfo"] = "单源独立检出"       # 融合信息
-                det["auxInterpretationInfo"] = f"YOLO 视觉算法检出 (所属大类: {object_type})"
+                det["auxInterpretationInfo"] = f"YOLO {payload_type.upper()}视觉算法检出 (所属大类: {object_type})"
             
             return {
                 "code": 200,
@@ -139,46 +161,24 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
 
 
     # ----------------------------------------------------
-    # 3. ：SAR 
+    # 3. 真实检测未执行时直接失败，不再用模拟结果兜底
     # ----------------------------------------------------
-    print(f"[目标检测] 🔄 触发模拟检测逻辑 | 模型: {tool_name}")
-    lon = float(params.get("lon", 120.1))
-    lat = float(params.get("lat", 30.2))
-    score = round(random.uniform(0.88, 0.98), 2)
-    
-    hw_lon = 0.005
-    hh_lat = 0.005
-    center_lon = lon + random.uniform(-0.01, 0.01)
-    center_lat = lat + random.uniform(-0.01, 0.01)
-    
-    target_data = {
-        "targetName": target_name,
-        "leftTopX": 0.15, "leftTopY": 0.15,
-        "leftBotX": 0.15, "leftBotY": 0.85,
-        "rightTopX": 0.85, "rightTopY": 0.15,
-        "rightBotX": 0.85, "rightBotY": 0.85,
-        "center_x": 0.50, "center_y": 0.50,
-        "leftTopLon": round(center_lon - hw_lon, 6),
-        "leftTopLat": round(center_lat + hh_lat, 6),
-        "leftBotLon": round(center_lon - hw_lon, 6),
-        "leftBotLat": round(center_lat - hh_lat, 6),
-        "rightTopLon": round(center_lon + hw_lon, 6),
-        "rightTopYLat": round(center_lat + hh_lat, 6),
-        "rightBotXLon": round(center_lon + hw_lon, 6),
-        "rightBotYLat": round(center_lat - hh_lat, 6),
-        "center_Lon": round(center_lon, 6),
-        "center_Lat": round(center_lat, 6),
-        "score": score,
-        "fusionSource": tool_name,  
-        "auxInterpretationInfo": "模拟检测算法检出"
-    }
-    
-    return {
-        "code": 200,
-        "msg": f"success (mocked in {mode} mode)",
-        "data": {"detections": [target_data]}
-    }
+    if tool_name in algorithm_config_map:
+        if not tiff_path:
+            error_msg = f"目标检测失败：{tool_name} 未获取到待检测影像路径"
+        elif not os.path.exists(tiff_path):
+            error_msg = f"目标检测失败：待检测影像不存在: {tiff_path}"
+        else:
+            error_msg = f"目标检测失败：{tool_name} 未进入真实检测分支"
+    else:
+        error_msg = f"目标检测失败：不支持的视觉检测工具: {tool_name}"
 
+    print(f"[错误] {error_msg}")
+    return {
+        "code": 500,
+        "msg": error_msg,
+        "data": {}
+    }
 
 # ==========================================
 # 2. 预处理逻辑 
