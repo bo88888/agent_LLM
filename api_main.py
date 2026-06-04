@@ -23,7 +23,6 @@ def build_registry() -> ToolRegistry:
         registry.register(tool_name, service_url)
     return registry
 
-
 def build_orchestration_payload(context: ExecutionContext) -> Dict[str, Any]:
     return {
         "plan": context.plan_rationale,
@@ -32,9 +31,18 @@ def build_orchestration_payload(context: ExecutionContext) -> Dict[str, Any]:
         "skipped": context.skipped_tools,
     }
 
+
+def build_frontend_report(context: ExecutionContext) -> Dict[str, Any]:
+    report = dict(context.final_report or {})
+    # 调试时想看系统信息，就注释掉下面这一行。
+    report.pop("_system_info", None)
+    # 调试时想看智能体调度过程，就注释掉下面这一行。
+    report.pop("orchestration", None)
+    return report
+
 # 定义前端传过来的数据结构
 class PipelineRequest(BaseModel):
-    task_id: str
+    task_id: str = ""
     tiff_path: str
     requirement_xml_path: str
 
@@ -46,8 +54,10 @@ async def submit_task(req: PipelineRequest):
     """
     前端调用此接口启动整个流水线，返回最终的 JSON 报告
     """
+    task_id = req.task_id.strip() if req.task_id else f"TASK_{uuid.uuid4().hex[:6]}"
+
     request = TaskRequest(
-        task_id=req.task_id,
+        task_id=task_id,
         tiff_path=req.tiff_path,
         requirement_xml_path=req.requirement_xml_path,
         payload_types=[],
@@ -74,7 +84,7 @@ async def submit_task(req: PipelineRequest):
 
     output_dir = Path("outputs")
     output_dir.mkdir(exist_ok=True)  
-    report_path = output_dir / f"report_{req.task_id}.json"
+    report_path = output_dir / f"report_{task_id}.json"
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(context.final_report, f, ensure_ascii=False, indent=2)
 
@@ -85,9 +95,11 @@ async def submit_task(req: PipelineRequest):
         "code": 200,
         "msg": "Pipeline executed successfully",
         "data": {
-            "final_report": context.final_report,
-            "quality_report": context.quality_report,
-            "orchestration": build_orchestration_payload(context),
+            "task_id": task_id,
+            "final_report": build_frontend_report(context),
+            # 调试时取消下面两行注释。
+            # "quality_report": context.quality_report,
+            # "orchestration": build_orchestration_payload(context),
         }
     }
 
@@ -142,8 +154,9 @@ async def slice_infer(req: SliceRequest):
         "code": 200,
         "msg": f"success, batch processed {len(req.pointPath)} slices",
         "data": all_extracted_targets,
-        "quality_report": context.quality_report,
-        "orchestration": build_orchestration_payload(context),
+        # 调试时取消下面两行注释。
+        # "quality_report": context.quality_report,
+        # "orchestration": build_orchestration_payload(context),
     }
 
     with open(report_path, "w", encoding="utf-8") as f:
