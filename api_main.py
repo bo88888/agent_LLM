@@ -38,6 +38,7 @@ def build_frontend_report(context: ExecutionContext) -> Dict[str, Any]:
     report.pop("_system_info", None)
     # 调试时想看智能体调度过程，就注释掉下面这一行。
     report.pop("orchestration", None)
+    report.pop("execution_status", None)
     return report
 
 # 定义前端传过来的数据结构
@@ -81,12 +82,14 @@ async def submit_task(req: PipelineRequest):
     # 4. 后处理与报告
     context = PostprocessAgent().run(context)
     context = ReportAgent().run(context)
+    clean_report = build_frontend_report(context)
 
     output_dir = Path("outputs")
     output_dir.mkdir(exist_ok=True)  
     report_path = output_dir / f"report_{task_id}.json"
+
     with open(report_path, "w", encoding="utf-8") as f:
-        json.dump(context.final_report, f, ensure_ascii=False, indent=2)
+        json.dump(clean_report, f, ensure_ascii=False, indent=2)
 
     print(f"✅ 报告已成功保存至容器内部路径: {report_path}")
 
@@ -96,7 +99,7 @@ async def submit_task(req: PipelineRequest):
         "msg": "Pipeline executed successfully",
         "data": {
             "task_id": task_id,
-            "final_report": build_frontend_report(context),
+            "final_report": clean_report,
             # 调试时取消下面两行注释。
             # "quality_report": context.quality_report,
             # "orchestration": build_orchestration_payload(context),

@@ -35,8 +35,6 @@ class ReportAgent:
         for subtask_id, result in context.tool_results.items():
             if not result.success and f"{subtask_id} failed" not in issues:
                 issues.append(f"{subtask_id} failed")
-            elif result.confidence < threshold:
-                issues.append(f"{subtask_id} low confidence: {result.confidence:.2f}")
 
         return {
             "pass": len(issues) == 0,

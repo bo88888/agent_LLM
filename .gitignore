@@ -36,4 +36,7 @@ best.pt
 *.weights
 
 *.jpg
+*.png
+*.pptx
+*.aux.xml
 data/sample_packet/detect_results/**/*.json
