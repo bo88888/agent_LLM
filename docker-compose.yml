@@ -1,7 +1,7 @@
 
 services:
   app:
-    image: huo-infer-v8:v3
+    image: huo-infer-v8:v4
     container_name: multi_payload_app
     working_dir: /workspace
     ports:
@@ -23,7 +23,6 @@ services:
         # 1. 环境变量与依赖配置
         export LD_LIBRARY_PATH="/mnt/ww/opencv460/lib64:/usr/local/lib:$${LD_LIBRARY_PATH:-}"
         export PYTHONPATH="/workspace:/app:$${PYTHONPATH:-}"
-        python -m pip install --no-cache-dir -r /workspace/requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
         # 2. 后台启动算法服务 (开启 --reload)
         cd /app

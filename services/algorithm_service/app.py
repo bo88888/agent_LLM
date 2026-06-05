@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from SAR_pro import process_sar_image
 from opt_pro import process_optical_rs_image
 from Optical_detection.infer_OPT_SLD import run_optical_detection
+from Slice_detection.resnet_infer import run_slice_batch_inference
 app = FastAPI()
 
 def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -396,36 +397,17 @@ def infer(payload: Dict[str, Any]):
     # 最后统一包装返回给调度器
     return build_mcp_response(subtask_id, tool_name, algo_response)
 
-
 @app.post("/slice_infer")
-
 def slice_infer_endpoint(payload: Dict[str, Any]):
     tool_name = payload.get("tool_name", "")
     subtask_id = payload.get("subtask_id", "")
     params = payload.get("parameters", {})
-    slice_paths = params.get("pointPathList", [])
-    all_detections = []
-
-    try:
-        for idx, path in enumerate(slice_paths):
-            all_detections.append({
-                "targetName": "minchuan",
-                "score": 0.95,
-                "source_image": os.path.basename(path), 
-                "fusionSource": tool_name,
-                "fusionBasis": "切片视觉特征识别",
-                "fusionInfo": "单源独立检出",
-                "auxInterpretationInfo": "切片专属算法批量检出"
-            })
-            
-        algo_response = {
-            "code": 200,
-            "msg": f"batch success ({len(slice_paths)} images)",
-            "data": {"detections": all_detections}
-        }
-        
-    except Exception as e:
-        print(f"[ERROR] 批量执行异常:\n{traceback.format_exc()}")
-        algo_response = {"code": 500, "msg": f"Batch failed: {str(e)}", "data": {}}
+    
+    slice_paths = params.get("pointPathList", []) 
+    
+    algo_response = run_slice_batch_inference(slice_paths, tool_name)
 
     return build_mcp_response(subtask_id, tool_name, algo_response)
+
+
+
