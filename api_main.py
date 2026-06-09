@@ -1,10 +1,11 @@
 import json
 import uuid
+import time
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from pathlib import Path
-
+from datetime import datetime
 from core.schema import ExecutionContext, TaskRequest
 from agents.orchestrator_agent import OrchestratorAgent
 from agents.postprocess_agent import PostprocessAgent
@@ -14,6 +15,7 @@ from config import HTTP_TIMEOUT, TOOL_SERVICE_MAP
 from mcp.registry import ToolRegistry
 from agents.invoker_agent import InvokerAgent
 from scheduler.scheduler_center import IntelligentScheduler
+
 
 app = FastAPI(title="智能体多载荷调度中心 API")
 
@@ -34,11 +36,9 @@ def build_orchestration_payload(context: ExecutionContext) -> Dict[str, Any]:
 
 def build_frontend_report(context: ExecutionContext) -> Dict[str, Any]:
     report = dict(context.final_report or {})
-    # 调试时想看系统信息，就注释掉下面这一行。
-    report.pop("_system_info", None)
     # 调试时想看智能体调度过程，就注释掉下面这一行。
-    report.pop("orchestration", None)
-    report.pop("execution_status", None)
+    # report.pop("orchestration", None)
+    # report.pop("execution_status", None)
     return report
 
 # 定义前端传过来的数据结构
@@ -50,6 +50,9 @@ class PipelineRequest(BaseModel):
 # 接口一：原来的全域底图识别接口 
 @app.post("/api/v1/task/submit")
 async def submit_task(req: PipelineRequest):
+    start_time = time.time()
+    console.print("\n[bold cyan]================ 🚀 收到底图检测请求 ================[/bold cyan]")
+
     """
     前端调用此接口启动整个流水线，返回最终的 JSON 报告
     """
@@ -69,9 +72,16 @@ async def submit_task(req: PipelineRequest):
         },
     )
 
+    console.print("[dim]正在进行任务语义理解与任务拆解...[/dim]")
+
     context = ExecutionContext(request=request)
 
     registry = build_registry()
+
+
+    # 🚀 新增：打印智能体拆解出的“思维导图”
+    print_agent_planning(context)
+
 
     # 2. 规则型 Orchestrator 持有完整上下文，完成理解、动态拆解和可解释规划。
     context = OrchestratorAgent(registry).prepare(
@@ -81,6 +91,7 @@ async def submit_task(req: PipelineRequest):
             "constraints": {"need_geo_correction": True}
         }
     )
+    console.print("[bold yellow]⚡ 调度器就绪，开始下发任务至底层算法节点执行...[/bold yellow]")
 
     # 3. 智能调度执行：并发、重试、失败路由和结构化轨迹。
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
@@ -88,9 +99,25 @@ async def submit_task(req: PipelineRequest):
     context = await scheduler.run_async(context)
 
     # 4. 后处理与报告
+    console.print("[dim]🛠️ 底层算法执行完毕，正在进行目标融合与报告生成...[/dim]")
+
     context = PostprocessAgent().run(context)
     context = ReportAgent().run(context)
-    clean_report = build_frontend_report(context)
+    print_execution_summary(context, start_time)
+
+    end_time = time.time()
+    time_cost = round(end_time - start_time, 2)
+    finish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    raw_report = build_frontend_report(context)
+    clean_report = {
+        "code": raw_report["code"],
+        "msg": raw_report["msg"],          
+        "task_id": task_id,
+        "detection_time": finish_time,     
+        "time_cost_seconds": time_cost,    
+        "data": raw_report["data"]         
+    }
 
     output_dir = Path("outputs")
     output_dir.mkdir(exist_ok=True)  
@@ -100,19 +127,9 @@ async def submit_task(req: PipelineRequest):
         json.dump(clean_report, f, ensure_ascii=False, indent=2)
 
     print(f"✅ 报告已成功保存至容器内部路径: {report_path}")
+    return clean_report
 
-    # 5. 直接将最终的 json 报告作为 HTTP 响应返回给前端！
-    return {
-        "code": 200,
-        "msg": "Pipeline executed successfully",
-        "data": {
-            "task_id": task_id,
-            "final_report": clean_report,
-            # 调试时取消下面两行注释。
-            # "quality_report": context.quality_report,
-            # "orchestration": build_orchestration_payload(context),
-        }
-    }
+
 
 class SliceRequest(BaseModel):
     pointPath: List[str]
@@ -121,7 +138,7 @@ class SliceRequest(BaseModel):
 @app.post("/api/v1/task/slice_infer")
 
 async def slice_infer(req: SliceRequest):
-
+    start_time = time.time()
     all_extracted_targets = []  # 用于存放所有切片跑出来的目标大池子
     print(f"🚀 收到切片批量处理请求，共计 {len(req.pointPath)} 张切片")
 
@@ -162,6 +179,11 @@ async def slice_infer(req: SliceRequest):
     context = PostprocessAgent().run(context)
     context = ReportAgent().run(context)
     all_extracted_targets = context.metadata.get("fused_targets", [])
+
+    end_time = time.time()
+    time_cost = round(end_time - start_time, 2)
+    finish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     output_dir = Path("outputs")
     output_dir.mkdir(parents=True, exist_ok=True)  
     report_path = output_dir / f"report_slice.json"
@@ -169,6 +191,8 @@ async def slice_infer(req: SliceRequest):
     final_response = {
         "code": 200,
         "msg": f"success, batch processed {len(req.pointPath)} slices",
+        "detection_time": finish_time,          # ✨ 时间放前面
+        "time_cost_seconds": time_cost,         # ✨ 耗时放前面
         "data": all_extracted_targets,
         # 调试时取消下面两行注释。
         # "quality_report": context.quality_report,

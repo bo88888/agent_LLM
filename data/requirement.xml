@@ -7,13 +7,8 @@
     <payload_types>
         <!-- <type>SAR</type> -->
         <type>OPTICAL</type>
-        <type>ELINT</type>
+        <!-- <type>ELINT</type> -->
     </payload_types>
-
-    <input_files>
-        <!-- <SAR>data/sample_packet/IMAGE_PRSC-S1_SAR_WH0731_06221709102025_001064_S15_I01_GEC_1_HH_clip.tif</SAR> -->
-        <OPTICAL>data/sample_packet/Suaogang.tif</OPTICAL>
-    </input_files>
 
     <target_classes>
         <!-- <class>plane</class> -->
@@ -21,12 +16,10 @@
         <!-- <class>vehicle</class> -->
     </target_classes>
 
-    <target_region>
+    <!-- <target_region>
         <lon>120.1</lon>
         <lat>30.2</lat>
         <radius_km>20</radius_km>
-    </target_region>
-
-    <tile_size>1k*1k</tile_size>
+    </target_region> -->
 
 </requirement>

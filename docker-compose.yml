@@ -6,7 +6,6 @@ services:
     working_dir: /workspace
     runtime: nvidia
     ports:
-      - "8888:8888"  
       - "9000:9000"  
     environment:
       OMP_NUM_THREADS: "8"

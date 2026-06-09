@@ -100,13 +100,5 @@ def build_final_report(fused_targets: List[dict], task_id: str, region: dict, mo
         "code": 200,
         "msg": f"任务执行成功。共发现 {len(fused_targets)} 个融合目标。",
         "data": fused_targets,
-        
-        # 将原有的系统元信息包装到一个附属字段中，避免破坏主结构
-        "_system_info": {
-            "task_id": task_id,
-            "detection_mode": mode,
-            "task_type": "multi_payload_detection",
-            "target_region": region,
-            "disposal_suggestion": ["建议下发打击单元。", "建议无人机抵近侦察。"]
-        }
+  
     }

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import json
 from osgeo import gdal, osr
-os.environ['PROJ_LIB'] = '/opt/conda/share/proj'
+
 # 计算左上和右下的经纬度
 def get_tif_corners_latlon(tif_path):
     ds = gdal.Open(tif_path)
@@ -17,7 +17,7 @@ def get_tif_corners_latlon(tif_path):
     height = ds.RasterYSize
 
     # 原始的两个角点坐标
-    # 坐上
+    # 左上
     ulx = gt[0]
     uly = gt[3]
     # 右下
@@ -28,21 +28,35 @@ def get_tif_corners_latlon(tif_path):
     if proj:
         src_srs = osr.SpatialReference()
         src_srs.ImportFromWkt(proj)
-        tgt_srs = osr.SpatialReference()
-        tgt_srs.ImportFromEPSG(4326)
+        
+        # 🚀 核心修复：如果图像已经是地理坐标系（如WGS84），直接返回，绝不调用报错的转换机制！
+        if src_srs.IsGeographic():
+            ul_lon, ul_lat = ulx, uly
+            lr_lon, lr_lat = lrx, lry
+        else:
+            tgt_srs = osr.SpatialReference()
+            tgt_srs.ImportFromEPSG(4326)
+            
+            # 兼容 GDAL 3.x，防止经纬度反转
+            src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+            tgt_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
-        transfrom = osr.CoordinateTransformation(src_srs, tgt_srs)
-        ul_lon, ul_lat, _ = transfrom.TransformPoint(ulx, uly)
-        lr_lon, lr_lat, _ = transfrom.TransformPoint(lrx, lry)
+            try:
+                transform = osr.CoordinateTransformation(src_srs, tgt_srs)
+                ul_lon, ul_lat, _ = transform.TransformPoint(ulx, uly)
+                lr_lon, lr_lat, _ = transform.TransformPoint(lrx, lry)
+            except Exception as e:
+                print(f"[警告] 坐标转换失败，使用原始坐标代替: {e}")
+                ul_lon, ul_lat = ulx, uly
+                lr_lon, lr_lat = lrx, lry
     else:
         ul_lon, ul_lat = ulx, uly
         lr_lon, lr_lat = lrx, lry
     ds = None
     return [ul_lat, ul_lon, lr_lat, lr_lon]
 
-
 # --------------------------
-# 新增：旋转框（四边形）IOU计算
+# 旋转框（四边形）IOU计算
 # --------------------------
 def polygon_iou(poly1, poly2):
     """
@@ -62,7 +76,7 @@ def polygon_iou(poly1, poly2):
     return inter_area / union_area
 
 # --------------------------
-# 新增：自定义旋转框NMS
+# 旋转框NMS
 # --------------------------
 def rotated_nms(detections, iou_threshold=0.5):
     """
@@ -93,21 +107,88 @@ def rotated_nms(detections, iou_threshold=0.5):
 
     return [sorted_dets[i] for i in keep]
 
+# --------------------------
+# 新增：水平框NMS
+# --------------------------
+def horizontal_nms(detections, iou_threshold=0.5):
+    """水平框非极大值抑制"""
+    if not detections:
+        return []
+    # 按置信度降序排序
+    sorted_dets = sorted(detections, key=lambda x: x['confidence'], reverse=True)
+    keep = []
+    for i in range(len(sorted_dets)):
+        current = sorted_dets[i]
+        x1, y1, x2, y2 = current['xyxy']
+        keep_flag = True
+        for j in keep:
+            j_x1, j_y1, j_x2, j_y2 = sorted_dets[j]['xyxy']
+            # 计算IOU
+            inter_x1 = max(x1, j_x1)
+            inter_y1 = max(y1, j_y1)
+            inter_x2 = min(x2, j_x2)
+            inter_y2 = min(y2, j_y2)
+            inter_area = max(0, inter_x2 - inter_x1) * max(0, inter_y2 - inter_y1)
+            area1 = (x2 - x1) * (y2 - y1)
+            area2 = (j_x2 - j_x1) * (j_y2 - j_y1)
+            iou = inter_area / (area1 + area2 - inter_area + 1e-6)
+            if iou > iou_threshold:
+                keep_flag = False
+                break
+        if keep_flag:
+            keep.append(i)
+    return [sorted_dets[i] for i in keep]
+
+# ===================== 新增裁剪函数 =====================
+def crop_and_save_targets(img, detections, img_name, save_root):
+    """
+    根据检测框裁剪目标并保存
+    :param img: 原始图像
+    :param detections: 检测结果列表
+    :param img_name: 图像名
+    :param save_root: 裁剪保存根目录，为空则不保存
+    """
+    if not save_root or not detections:
+        return
+    os.makedirs(save_root, exist_ok=True)
+    for idx, det in enumerate(detections):
+        corners = det["corners"]
+        # 取外接矩形做裁剪（兼容旋转框/水平框）
+        x_coords = corners[:, 0]
+        y_coords = corners[:, 1]
+        x1 = int(np.floor(np.min(x_coords)))
+        y1 = int(np.floor(np.min(y_coords)))
+        x2 = int(np.ceil(np.max(x_coords)))
+        y2 = int(np.ceil(np.max(y_coords)))
+        # 边界限制
+        h, w = img.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        # 裁剪
+        crop_img = img[y1:y2, x1:x2]
+        # 保存命名: 原图名_序号_类别_置信度.jpg
+        cls_name = det["class_name"]
+        conf = det["confidence"]
+        save_name = f"{img_name}_{idx}_{cls_name}_{conf:.4f}.jpg"
+        save_path = os.path.join(save_root, save_name)
+        cv2.imwrite(save_path, crop_img)
+    print(f"已裁剪并保存 {len(detections)} 个目标至: {save_root}")
+# =======================================================
+
 def get_parse():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model_path', type=str, default='runs/1/weights/best.pt', help='模型权重路径')
     parser.add_argument('--source', type=str, default='test_images', help='输入图像/文件夹路径')
     parser.add_argument('--output_root', type=str, default='inference_results', help='推理结果根目录')
     parser.add_argument('--conf', type=float, default=0.2, help='置信度阈值')
-    parser.add_argument('--nms_iou', type=float, default=0.3, help='NMS的IOU阈值（旋转框）')
+    parser.add_argument('--nms_iou', type=float, default=0.3, help='NMS的IOU阈值')
     parser.add_argument('--tile_size', type=int, default=1024, help='切分图像的大小')
     parser.add_argument('--overlap', type=int, default=128, help='图像块之间的重叠像素数')
     parser.add_argument('--large_threshold', type=int, default=4096, help='判定为大图的阈值')
     parser.add_argument('--object_type', type=str, default='ship', help='目标类型：ship/plane/vehicle')
-    # parser.add_argument('--lat0', type=float, default=39.9042, help='图像左上角纬度')
-    # parser.add_argument('--lon0', type=float, default=116.4074, help='图像左上角经度')
-    # parser.add_argument('--lat1', type=float, default=39.9092, help='图像右下角纬度')
-    # parser.add_argument('--lon1', type=float, default=116.4124, help='图像右下角经度')
+    # 新增参数：裁剪保存目录，不传则不裁剪
+    parser.add_argument('--crop_save_dir', type=str, default='', help='目标裁剪保存目录，留空不执行裁剪')
+ 
     return parser.parse_args()
 
 def get_unique_dir_name(base_dir, base_name):
@@ -147,41 +228,48 @@ def split_image(image, tile_size=1024, overlap=128):
 
     return tiles, positions
 
-def merge_detections(detections, img_width, img_height, nms_threshold=0.1):
+def merge_detections(detections, img_width, img_height, nms_threshold=0.1, is_obb=True):
     if not detections:
         return []
 
     valid_detections = []
     for det in detections:
-        x, y, w, h, angle_deg = det['box']
-        if w < 1 or h < 1:
-            continue
-        if x < 0 or x > img_width or y < 0 or y > img_height:
-            continue
+        # 过滤无效框
+        if is_obb:
+            x, y, w, h, angle_deg = det['box']
+            if w < 1 or h < 1:
+                continue
+        else:
+            x1, y1, x2, y2 = det['xyxy']
+            if (x2-x1) < 1 or (y2-y1) <1:
+                continue
         valid_detections.append(det)
 
     if not valid_detections:
         print("未检测到有效目标，跳过NMS")
         return []
 
-    return rotated_nms(valid_detections, iou_threshold=nms_threshold)
+    # 根据模型类型选择NMS
+    if is_obb:
+        return rotated_nms(valid_detections, iou_threshold=nms_threshold)
+    else:
+        return horizontal_nms(valid_detections, iou_threshold=nms_threshold)
 
-def draw_rotated_boxes(image, detections, class_names):
-    colors = [(np.random.randint(0, 255), np.random.randint(0, 255), np.random.randint(0, 255))
-             for _ in range(len(class_names))]
+def draw_boxes(image, detections, is_obb=True):
+    """统一绘制框：支持旋转框和水平框"""
     img_copy = image.copy()
+    color = (0, 255, 0)  # 绿色框
 
     for det in detections:
         corners = det['corners']
         conf = det['confidence']
-        cls_id = det['class_id']
         class_name = det['class_name']
-        angle_deg = det['box'][4]
 
-        color = colors[cls_id % len(colors)]
+        # 绘制轮廓
         cv2.drawContours(img_copy, [np.int32(corners)], 0, color, 2)
 
-        text = f"{class_name}: {conf:.2f} angle: {angle_deg:.4f}"
+        # 绘制文本
+        text = f"{class_name}: {conf:.2f}"
         text_x, text_y = int(corners[0][0]), int(corners[0][1]) - 10
         text_y = text_y if text_y > 10 else int(corners[0][1]) + 20
         cv2.rectangle(img_copy, (text_x, text_y - 20), (text_x + len(text)*12, text_y), color, -1)
@@ -208,7 +296,7 @@ def numpy_serializer(obj):
     raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
 
 def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap, large_threshold,
-                 class_names, output_root, lat0, lon0, lat1, lon1, object_type="", payload_type=""):
+                 class_names, output_root, lat0, lon0, lat1, lon1, is_obb=True, crop_dir=''):
     image = cv2.imread(image_path)
     if image is None:
         print(f"无法读取图像: {image_path}")
@@ -217,18 +305,11 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
     all_detections = []
 
     img_name = os.path.splitext(os.path.basename(image_path))[0]
-
-    result_dir = output_root
+    os.makedirs(output_root, exist_ok=True)
+    result_dir = os.path.join(output_root, get_unique_dir_name(output_root, img_name))
     os.makedirs(result_dir, exist_ok=True)
-    name_parts = [img_name]
-    if payload_type:
-        name_parts.append(payload_type)
-    if object_type:
-        name_parts.append(object_type)
-    file_prefix = "_".join(name_parts)
-    os.makedirs(result_dir, exist_ok=True)
-
     print(f"处理图像: {image_path} (尺寸: {img_width}x{img_height})")
+    print(f"模型类型: {'OBB(旋转框)' if is_obb else 'HBB(水平框)'}")
     print(f"结果保存至: {result_dir}")
 
     if img_width > large_threshold or img_height > large_threshold:
@@ -239,184 +320,155 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
             results = model(tile, conf=conf_threshold, verbose=False)
 
             for result in results:
+                if is_obb:
+                    # ========== OBB旋转框处理 ==========
+                    for obb in result.obb:
+                        try:
+                            xy_tensor = obb.xyxyxyxy[0].cpu()
+                            xy_array = xy_tensor.numpy()
+                            xy_list = xy_array.flatten().tolist()
+                            if len(xy_list) != 8:
+                                continue
+                        except:
+                            continue
+
+                        corners_tile = [(xy_list[0], xy_list[1]), (xy_list[2], xy_list[3]),
+                                        (xy_list[4], xy_list[5]), (xy_list[6], xy_list[7])]
+                        # 坐标偏移
+                        corners = [(x+x_offset, y+y_offset) for x,y in corners_tile]
+                        corners_np = np.array(corners, dtype=np.float32)
+
+                        try:
+                            rect = cv2.minAreaRect(corners_np)
+                            (cx, cy), (w, h), angle_deg = rect
+                            if w < h:
+                                angle_deg += 90
+                            angle_deg %= 180
+                        except:
+                            continue
+
+                        conf = float(obb.conf[0].cpu())
+                        cls_id = int(obb.cls[0].cpu())
+                        if cls_id <0 or cls_id >= len(class_names):
+                            continue
+
+                        all_detections.append({
+                            'box': (cx, cy, w, h, round(angle_deg,4)),
+                            'corners': corners_np,
+                            'confidence': conf,
+                            'class_id': cls_id,
+                            'class_name': class_names[cls_id]
+                        })
+                else:
+                    # ========== HBB水平框处理 ==========
+                    for box in result.boxes:
+                        try:
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                            conf = float(box.conf[0].cpu())
+                            cls_id = int(box.cls[0].cpu())
+                        except:
+                            continue
+                        if cls_id <0 or cls_id >= len(class_names):
+                            continue
+
+                        # 偏移坐标
+                        x1 += x_offset
+                        y1 += y_offset
+                        x2 += x_offset
+                        y2 += y_offset
+                        # 生成四边形角点（统一格式）
+                        corners_np = np.array([[x1,y1], [x2,y1], [x2,y2], [x1,y2]], dtype=np.float32)
+                        cx, cy = (x1+x2)/2, (y1+y2)/2
+
+                        all_detections.append({
+                            'xyxy': (x1,y1,x2,y2),
+                            'box': (cx, cy, x2-x1, y2-y1, 0.0),  # 角度固定为0
+                            'corners': corners_np,
+                            'confidence': conf,
+                            'class_id': cls_id,
+                            'class_name': class_names[cls_id]
+                        })
+
+        merged = merge_detections(all_detections, img_width, img_height, nms_threshold=nms_iou, is_obb=is_obb)
+    else:
+        # 小图直接推理
+        results = model(image, conf=conf_threshold, verbose=False)
+        merged = []
+        if is_obb:
+            # OBB处理
+            for result in results:
                 for obb in result.obb:
                     try:
                         xy_tensor = obb.xyxyxyxy[0].cpu()
-                        xy_array = xy_tensor.numpy()
-                        xy_list = xy_array.flatten().tolist()
+                        xy_list = xy_tensor.numpy().flatten().tolist()
+                        if len(xy_list)!=8: continue
+                    except: continue
 
-                        if len(xy_list) != 8:
-                            print(f"角点数量错误，跳过目标")
-                            continue
-                    except Exception as e:
-                        print(f"提取角点失败: {e}，跳过目标")
-                        continue
-
-                    try:
-                        corners_tile = [
-                            (xy_list[0], xy_list[1]),
-                            (xy_list[2], xy_list[3]),
-                            (xy_list[4], xy_list[5]),
-                            (xy_list[6], xy_list[7])
-                        ]
-                    except IndexError:
-                        print(f"角点解析错误，跳过目标")
-                        continue
-
-                    corners = []
-                    valid = True
-                    for (x, y) in corners_tile:
-                        if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
-                            valid = False
-                            break
-                        if np.isnan(x) or np.isinf(x) or np.isnan(y) or np.isinf(y):
-                            valid = False
-                            break
-                        corners.append((x + x_offset, y + y_offset))
-
-                    if not valid:
-                        print(f"无效角点坐标，跳过目标")
-                        continue
-
+                    corners = [(xy_list[0], xy_list[1]), (xy_list[2], xy_list[3]),
+                                (xy_list[4], xy_list[5]), (xy_list[6], xy_list[7])]
                     corners_np = np.array(corners, dtype=np.float32)
-                    if corners_np.shape != (4, 2):
-                        print(f"角点形状错误，跳过目标")
-                        continue
-
-                    corners_unique = np.unique(corners_np, axis=0)
-                    if len(corners_unique) < 2:
-                        print(f"有效角点数量不足，跳过目标")
-                        continue
 
                     try:
-                        rect = cv2.minAreaRect(corners_unique)
+                        rect = cv2.minAreaRect(corners_np)
                         (cx, cy), (w, h), angle_deg = rect
-                        # 判断长短边
-                        if w < h:
-                            angle_deg = angle_deg + 90
-                        angle_deg = angle_deg % 180
+                        if w < h: angle_deg +=90
+                        angle_deg %=180
+                    except: continue
 
-                    except cv2.error as e:
-                        print(f"计算最小外接矩形失败：{e}，跳过目标")
-                        continue
+                    conf = float(obb.conf[0].cpu())
+                    cls_id = int(obb.cls[0].cpu())
+                    if cls_id <0 or cls_id >= len(class_names): continue
 
+                    merged.append({
+                        'box': (cx, cy, w, h, round(angle_deg,4)),
+                        'corners': corners_np,
+                        'confidence': conf,
+                        'class_id': cls_id,
+                        'class_name': class_names[cls_id]
+                    })
+        else:
+            # HBB处理
+            for result in results:
+                for box in result.boxes:
                     try:
-                        conf = float(obb.conf[0].cpu())
-                        cls_id = int(obb.cls[0].cpu())
-                    except Exception as e:
-                        print(f"提取置信度/类别失败: {e}，跳过目标")
-                        continue
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        conf = float(box.conf[0].cpu())
+                        cls_id = int(box.cls[0].cpu())
+                    except: continue
+                    if cls_id <0 or cls_id >= len(class_names): continue
 
-                    if cls_id < 0 or cls_id >= len(class_names):
-                        # print(f"跳过未知类别ID: {cls_id}")
-                        continue
+                    corners_np = np.array([[x1,y1], [x2,y1], [x2,y2], [x1,y2]], dtype=np.float32)
+                    cx, cy = (x1+x2)/2, (y1+y2)/2
 
-                    all_detections.append({
-                        'box': (cx, cy, w, h, round(angle_deg, 4)),# 现在的angle_deg是长边与水平方向的夹角，范围0-180
+                    merged.append({
+                        'xyxy': (x1,y1,x2,y2),
+                        'box': (cx, cy, x2-x1, y2-y1, 0.0),
                         'corners': corners_np,
                         'confidence': conf,
                         'class_id': cls_id,
                         'class_name': class_names[cls_id]
                     })
 
-        merged = merge_detections(all_detections, img_width, img_height, nms_threshold=nms_iou)
-    else:
-        results = model(image, conf=conf_threshold, verbose=False)
-        merged = []
-        for result in results:
-            for obb in result.obb:
-                try:
-                    xy_tensor = obb.xyxyxyxy[0].cpu()
-                    xy_array = xy_tensor.numpy()
-                    xy_list = xy_array.flatten().tolist()
-
-                    if len(xy_list) != 8:
-                        print(f"角点数量错误，跳过目标")
-                        continue
-                except Exception as e:
-                    print(f"提取角点失败: {e}，跳过目标")
-                    continue
-
-                try:
-                    corners = [
-                        (xy_list[0], xy_list[1]),
-                        (xy_list[2], xy_list[3]),
-                        (xy_list[4], xy_list[5]),
-                        (xy_list[6], xy_list[7])
-                    ]
-                except IndexError:
-                    print(f"角点解析错误，跳过目标")
-                    continue
-
-                valid = True
-                for (x, y) in corners:
-                    if not (isinstance(x, (int, float)) and isinstance(y, (int, float))):
-                        valid = False
-                        break
-                    if np.isnan(x) or np.isinf(x) or np.isnan(y) or np.isinf(y):
-                        valid = False
-                        break
-                if not valid:
-                    print(f"无效角点坐标，跳过目标")
-                    continue
-
-                corners_np = np.array(corners, dtype=np.float32)
-                if corners_np.shape != (4, 2):
-                    print(f"角点形状错误，跳过目标")
-                    continue
-
-                corners_unique = np.unique(corners_np, axis=0)
-                if len(corners_unique) < 2:
-                    print(f"有效角点数量不足，跳过目标")
-                    continue
-
-                try:
-                    rect = cv2.minAreaRect(corners_unique)
-                    (cx, cy), (w, h), angle_deg = rect
-                except cv2.error as e:
-                    print(f"计算最小外接矩形失败：{e}，跳过目标")
-                    continue
-
-                try:
-                    conf = float(obb.conf[0].cpu())
-                    cls_id = int(obb.cls[0].cpu())
-                except Exception as e:
-                    print(f"提取置信度/类别失败: {e}，跳过目标")
-                    continue
-
-                if cls_id < 0 or cls_id >= len(class_names):
-                    # print(f"跳过未知类别ID: {cls_id}")
-                    continue
-
-                merged.append({
-                    'box': (cx, cy, w, h, angle_deg),
-                    'corners': corners_np,
-                    'confidence': conf,
-                    'class_id': cls_id,
-                    'class_name': class_names[cls_id]
-                })
-
-        merged = merge_detections(merged, img_width, img_height, nms_threshold=nms_iou)
+        merged = merge_detections(merged, img_width, img_height, nms_threshold=nms_iou, is_obb=is_obb)
 
     print(f"最终检测到 {len(merged)} 个有效目标")
+    # ========== 调用新增裁剪函数 ==========
+    crop_and_save_targets(image, merged, img_name, crop_dir)
 
-    # 保存推理结果图片
-    result_image = draw_rotated_boxes(image, merged, class_names)
-    result_img_path = os.path.join(result_dir, f"{file_prefix}_result.jpg")
+    # 保存结果图
+    result_image = draw_boxes(image, merged, is_obb=is_obb)
+    result_img_path = os.path.join(result_dir, f"{img_name}_result.jpg")
     cv2.imwrite(result_img_path, result_image)
     print(f"推理图保存: {result_img_path}")
 
-
-    # 构建指定格式的结果数据
+    # 构建输出JSON
     output_data = {"data": []}
     for det in merged:
-
         corners = det['corners']
         lt_x, lt_y = corners[0]
         rt_x, rt_y = corners[1]
         rb_x, rb_y = corners[2]
         lb_x, lb_y = corners[3]
-
         center_x_pix, center_y_pix = det['box'][0], det['box'][1]
 
         # 百分比坐标
@@ -426,14 +478,13 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
         rb_x_per, rb_y_per = pixel_to_percent(rb_x, rb_y, img_width, img_height)
         center_x_per, center_y_per = pixel_to_percent(center_x_pix, center_y_pix, img_width, img_height)
 
-        # 经纬度坐标
+        # 经纬度
         lt_lat, lt_lon = pixel_to_latlon(lt_x, lt_y, img_width, img_height, lat0, lon0, lat1, lon1)
         lb_lat, lb_lon = pixel_to_latlon(lb_x, lb_y, img_width, img_height, lat0, lon0, lat1, lon1)
         rt_lat, rt_lon = pixel_to_latlon(rt_x, rt_y, img_width, img_height, lat0, lon0, lat1, lon1)
         rb_lat, rb_lon = pixel_to_latlon(rb_x, rb_y, img_width, img_height, lat0, lon0, lat1, lon1)
         center_lat, center_lon = pixel_to_latlon(center_x_pix, center_y_pix, img_width, img_height, lat0, lon0, lat1, lon1)
 
-        # 旋转角度
         angle_deg = det['box'][4]
 
         target_data = {
@@ -463,24 +514,24 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
         }
         output_data["data"].append(target_data)
 
-    # 保存JSON结果
-    json_path = os.path.join(result_dir, f"{file_prefix}_detections.json")
+    # 保存JSON
+    json_path = os.path.join(result_dir, f"{img_name}_detections.json")
     with open(json_path, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, ensure_ascii=False, indent=4, default=numpy_serializer)
     print(f"JSON结果保存: {json_path}")
     print("-" * 50)
+
     return output_data
 
 def main():
     args = get_parse()
     model = YOLO(args.model_path)
+    
+    # 自动判断模型类型：OBB/普通HBB
+    is_obb = model.task == "obb"
+    print(f"自动检测模型类型: {'旋转框OBB' if is_obb else '水平框HBB'}")
 
-    # class_names = [
-    #     'b52', 'airliner', 'c130', 'helicopter', 'cv',
-    #     'warcraft', 'other_boat', 'small_warcraft', 'submarine', 'cargo',
-    #     'small_airliner', 'fighter', 'station', 'oil_tank', 'harbor',
-    #     'playground', 'airport', 'bridge', 'ore-oil', 'digger'
-    # ]
+    # 类别配置
     if args.object_type == 'ship':
         class_names = [
             'aircraft_carrier', 'destroyer', 'cruiser', 'amphibious', 'depot_ship',
@@ -492,12 +543,11 @@ def main():
             'fighter', 'jiayouji', 'other', 'yujingji'
         ]
     elif args.object_type == 'vehicle':
-        class_names = [
-            'ddfsc', 'ldtxc'
-        ]
+        class_names = ['ddfsc', 'ldtxc']
     else:
         raise ValueError(f"错误的目标类型：{args.object_type}")
 
+    # 获取图像路径
     image_paths = []
     if os.path.isdir(args.source):
         for ext in ['jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff']:
@@ -508,7 +558,7 @@ def main():
 
     total = len(image_paths)
     if total == 0:
-        print(f"在 {args.source} 未找到任何图像文件")
+        print(f"未找到图像文件")
         return
     print(f"找到 {total} 个图像文件，开始推理...")
     print("-" * 50)
@@ -516,30 +566,32 @@ def main():
     all_results = {}
     for i, img_path in enumerate(image_paths, 1):
         print(f"正在处理{img_path} - {i}/{total}:")
-
         [lat0, lon0, lat1, lon1] = get_tif_corners_latlon(str(img_path))
 
         img_result = process_image(
             model, str(img_path), args.conf, args.nms_iou,
             args.tile_size, args.overlap, args.large_threshold,
             class_names, args.output_root, 
-            lat0, lon0, lat1, lon1
+            lat0, lon0, lat1, lon1,
+            is_obb=is_obb,
+            crop_dir=args.crop_save_dir
         )
         if img_result:
             all_results[os.path.basename(img_path)] = img_result
 
-    # 保存汇总JSON
+    # 汇总保存
     summary_json_path = os.path.join(args.output_root, "all_detections_summary.json")
     with open(summary_json_path, 'w', encoding='utf-8') as f:
         json.dump(all_results, f, ensure_ascii=False, indent=4, default=numpy_serializer)
     print(f"所有结果汇总保存: {summary_json_path}")
-    print(f"所有处理完成！结果根目录: {args.output_root}")
+    print(f"处理完成！结果目录: {args.output_root}")
 
-    print("\n推理结果汇总:")
-    print(json.dumps(all_results, ensure_ascii=False, indent=2, default=numpy_serializer))
-
-def run_optical_detection(image_path, model_path, output_root, object_type, payload_type='optical', conf=0.2):
+def run_optical_detection(image_path, model_path, output_root, object_type, payload_type='optical', conf=0.2, crop_save_dir=''):
     model = YOLO(model_path)
+    
+    # 🚀 新增：自动判断模型类型（OBB还是HBB）
+    is_obb = model.task == "obb"
+    print(f"[{payload_type}] 检测任务启动，模型类型: {'旋转框OBB' if is_obb else '水平框HBB'}")
     
     # 获取类别
     if object_type == 'ship':
@@ -560,20 +612,20 @@ def run_optical_detection(image_path, model_path, output_root, object_type, payl
     # 获取地理坐标
     [lat0, lon0, lat1, lon1] = get_tif_corners_latlon(image_path)
     
-    # 调用原有的核心处理函数
-    # nms_iou 默认给 0.3，切片大小 1024，重叠 128，大图阈值 4096
+
     output_data = process_image(
         model, image_path, conf, 0.3, 1024, 128, 4096,
-        class_names, output_root, lat0, lon0, lat1, lon1, object_type, payload_type
+        class_names, output_root, lat0, lon0, lat1, lon1, 
+        is_obb=is_obb, 
+        crop_dir=crop_save_dir
     )
     
     return output_data
 
-
 if __name__ == '__main__':
     main()
-
-
-
-# python infer_OPT_SLD.py --model_path /home/air/Code/SLD_Yolo/Opt/runs/silei_ship_obb/weights/best.pt --source datasets/test_img/ --output_root infer_results --object_type ship
+    
+    
+# python infer_OPT_SLD.py --model_path /home/air/Code/SLD_Yolo/Opt/runs/silei_ship_obb/weights/best.pt --source datasets/test_img/ --output_root infer_results/pridict --object_type ship --crop_save_dir infer_results/crop
+# python services/algorithm_service/Optical_detection/infer_OPT_SLD_V2.py --model_path services/algorithm_service/Optical_detection/best_plane.pt --source data/sample_packet/geo_correction_jiayi_wgs84_optical_enhanced.tif --output_root infer_results/pridict --object_type plane
 

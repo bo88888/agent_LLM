@@ -23,7 +23,6 @@ DETECTION_TASK_IDS = {
 
 class DecomposeAgent:
     """任务拆解智能体。
-
     负责把“一个总任务”拆成多个可调度的 SubTask。
     当前根据 ToolCapability 能力表动态匹配工具，而不是写死一条执行链。
     """
@@ -118,7 +117,8 @@ class DecomposeAgent:
     ) -> Tuple[List[SubTask], List[str], List[str]]:
         req = context.parsed_requirement
         payload_types = set(req.get("payload_types", []))
-        input_files = req.get("input_files", {})
+        input_path = req.get("tiff_path", "")
+
         tasks: List[SubTask] = []
         geo_deps: List[str] = []
         valid_payloads: List[str] = []
@@ -126,16 +126,6 @@ class DecomposeAgent:
         for capability in self._matching_capabilities("preprocess", mode):
             payload = capability.payload_types[0] if capability.payload_types else ""
             if payload not in payload_types:
-                continue
-
-            input_path = input_files.get(capability.input_key, "")
-            if not input_path or not input_path.strip():
-                self._append_skip(
-                    context,
-                    capability,
-                    f"{payload} payload was requested but input_files.{capability.input_key} is empty",
-                    payload_type=payload,
-                )
                 continue
 
             subtask_id = PREPROCESS_TASK_IDS.get(
@@ -171,8 +161,16 @@ class DecomposeAgent:
         if capability is None or not self._is_registered(capability.tool_name):
             context.metadata["decompose_error"] = "geo_correction_service is not registered"
             return []
+        target_classes = context.parsed_requirement.get("target_classes")
 
-        params = {"mode": mode, "target_resolution": "2m", "source_resolution": "200m"}
+        if not target_classes or len(target_classes) == 0:
+            context.metadata["decompose_error"] = "Missing required target_classes for geo_correction"
+            print(f"[ERROR] 几何校正任务创建失败: 缺少 target_classes 参数")
+            return []
+
+        primary_target = target_classes[0]
+
+        params = {"mode": mode, "target_resolution": "2m", "source_resolution": "200m", "target_class": primary_target}
         return [
             self._build_task(
                 "P3",

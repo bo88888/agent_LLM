@@ -20,10 +20,7 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ==========================================
 def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict, input_data: dict) -> dict:
     mode = params.get("mode", "base_map")
-    
-    # ----------------------------------------------------
-    # 1. 严格从上下文提取几何精校正后的图片路径 (区分 SAR 和 光学)
-    # ----------------------------------------------------
+
     tiff_path = ""
     previous_results = input_data.get("previous_results", {})
     
@@ -44,8 +41,6 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
                 elif tool_name.startswith("sar_") and "sar" in orig_input:
                     tiff_path = geo_path
                     break
-                    
-        # 如果通过上面的精准匹配找到了，就跳出大循环
         if tiff_path:
             break
             
@@ -66,8 +61,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             "msg": error_msg,
             "data": {}
         }
-    
-    # 确保路径是容器内的绝对路径
+
     if tiff_path and not tiff_path.startswith("/"):
         tiff_path = os.path.join("/app", tiff_path)
     
@@ -108,7 +102,6 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
     }
 
     if tool_name in algorithm_config_map and tiff_path and os.path.exists(tiff_path):
-        # 获取当前任务的配置
         algo_config = algorithm_config_map.get(tool_name)
         if not algo_config:
              return {"code": 500, "msg": f"不支持的视觉检测工具: {tool_name}", "data": {}}
@@ -118,10 +111,8 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
         
         # 动态拼接模型路径
         model_path = f"/app/Optical_detection/{algo_config['weight']}"
-        
         print(f"[目标检测] ⚡ 启动真实检测 | 载荷: {payload_type} | 模型: {tool_name} | 目标: {object_type} | 图: {tiff_path}")
         
-        # 严格检查权重文件是否存在
         if not os.path.exists(model_path):
             error_msg = f"未找到模型权重文件: {model_path}，请检查宿主机 Optical_detection 目录下是否有该文件！"
             print(f"[错误] {error_msg}")
@@ -162,7 +153,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
 
 
     # ----------------------------------------------------
-    # 3. 真实检测未执行时直接失败，不再用模拟结果兜底
+    # 3. 真实检测未执行时直接失败
     # ----------------------------------------------------
     if tool_name in algorithm_config_map:
         if not tiff_path:
@@ -195,7 +186,6 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
 
     try:
         if tool_name == "sar_denoise_service":
-            # 动态生成输出路径
             output_sar = os.path.join(base_dir, f"{name_only}_sar_denoised{ext}")
             
             # 获取算法参数
@@ -215,7 +205,6 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             }
             
         elif tool_name == "optical_enhance_service":
-            # 动态生成输出路径
             output_opt = os.path.join(base_dir, f"{name_only}_optical_enhanced{ext}")
             
             # 获取算法参数
@@ -232,10 +221,17 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 "msg": "Optical enhancement finished (Real)",
                 "data": {"optical_enhanced_path": output_opt}
             }
+        
         elif tool_name == "geo_correction_service":
             print(f"[调试] P3 已进入 geo_correction_service，input_data: {input_data.keys()}")
-            
-            base_map_path = "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif"
+            target_class = params.get("target_class")
+            GEOMETRIC_BASE_MAP_MAP = {
+                "ship": "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif",
+                "plane": "/app/data/sample_packet/jiayi_ref.tif",
+                "vehicle": "/app/data/sample_packet/vehicle_ref.tif"
+            }
+            base_map_path = GEOMETRIC_BASE_MAP_MAP.get(target_class)
+
             previous_results = input_data.get("previous_results", {})
             images_to_correct = []
             for res_content in previous_results.values():
@@ -350,7 +346,7 @@ def build_mcp_response(subtask_id: str, tool_name: str, algo_response: dict) -> 
         "tool_name": tool_name,
         "success": algo_response.get("code") == 200,
         "output": algo_response.get("data", {}),         
-        "message": algo_response.get("msg") or f"{tool_name} 处理完成"
+        "message": algo_response.get("msg") or f"{tool_name} 处理完成",
     }
     return response
 
@@ -367,9 +363,7 @@ def infer(payload: Dict[str, Any]):
     # --- 1. 预处理模块 ---
     if tool_name in {"sar_denoise_service", "optical_enhance_service", "geo_correction_service"}:
         tiff_path = params.get("tiff_path") or input_data.get("tiff_path", "")
-        
         print(f"[调试] infer 收到预处理请求: {tool_name}, tiff_path: {tiff_path}")
-        
         algo_response = run_local_preprocess_model(tool_name, tiff_path, params, input_data)
 
 
@@ -402,12 +396,6 @@ def slice_infer_endpoint(payload: Dict[str, Any]):
     tool_name = payload.get("tool_name", "")
     subtask_id = payload.get("subtask_id", "")
     params = payload.get("parameters", {})
-    
     slice_paths = params.get("pointPathList", []) 
-    
     algo_response = run_slice_batch_inference(slice_paths, tool_name)
-
     return build_mcp_response(subtask_id, tool_name, algo_response)
-
-
-
