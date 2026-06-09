@@ -115,7 +115,7 @@ def process_sar_image(input_path, output_path, kernel_size=3, clip_quant=2, n_st
     with rasterio.open(output_path, 'w', **profile) as dst:
         dst.write(img_out)
 
-    print(f"✅ L2 SAR 影像预处理完成！输出路径：{output_path}")
+    print(f"✅ P1 SAR去噪 预处理完成！输出路径：{output_path}")
     return img_enhanced
 
 # ====================== L2 影像调用示例 ======================

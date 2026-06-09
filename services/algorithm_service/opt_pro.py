@@ -111,7 +111,7 @@ def process_optical_rs_image(input_path, output_path, median_ksize=3, clip_perce
     except Exception as e:
         raise RuntimeError(f"保存影像失败：{str(e)}")
 
-    print(f"✅ 处理完成！结果已保存至：{output_path}")
+    print(f"✅ P2 光学增强预处理完成！结果已保存至：{output_path}")
     return img_enhanced
 
 # ====================== 调用示例 ======================

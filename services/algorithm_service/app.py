@@ -192,8 +192,8 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             kernel_size = params.get("kernel_size", 3)
             clip_quant = params.get("clip_quant", 2)
             n_std = params.get("n_std", 2)
-            
-            print(f"[预处理] 执行 SAR 去噪 | 输入: {tiff_path} | 输出: {output_sar}")
+
+            print(f"[预处理] P1 执行 SAR 去噪 | 输入: {tiff_path} ")
             
             # 调用真实算法
             process_sar_image(tiff_path, output_sar, kernel_size, clip_quant, n_std)
@@ -211,7 +211,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             median_ksize = params.get("median_ksize", 3)
             clip_percent = params.get("clip_percent", 2)
             
-            print(f"[预处理] 执行 光学增强 | 输入: {tiff_path} | 输出: {output_opt}")
+            print(f"[预处理] P2 执行 光学增强 | 输入: {tiff_path}")
             
             # 调用真实算法
             process_optical_rs_image(tiff_path, output_opt, median_ksize, clip_percent)
@@ -223,7 +223,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
             }
         
         elif tool_name == "geo_correction_service":
-            print(f"[调试] P3 已进入 geo_correction_service，input_data: {input_data.keys()}")
+            print(f"[预处理] P3 执行几何精矫正，input_data: {input_data.keys()}")
             target_class = params.get("target_class")
             GEOMETRIC_BASE_MAP_MAP = {
                 "ship": "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif",
@@ -261,7 +261,8 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                     errors="replace",
                     timeout=int(params.get("timeout", 300)),
                 )
-                
+                print(f"✅ P3 几何精校正完成 | 目标: {target_class} | 输出: {final_geo_path}")
+
                 if result.returncode != 0:
                     error_detail = (result.stderr or result.stdout or f"exit code {result.returncode}").strip()
                     return {"code": 500, "msg": f"C++ failed: {error_detail[:100]}", "data": {}}
