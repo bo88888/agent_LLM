@@ -4,16 +4,26 @@ services:
     image: huo-infer-v8:v4
     container_name: multi_payload_app
     working_dir: /workspace
+    runtime: nvidia
     ports:
       - "8888:8888"  
       - "9000:9000"  
     environment:
       OMP_NUM_THREADS: "8"
       PYTHONUNBUFFERED: "1"
+      NVIDIA_VISIBLE_DEVICES: "all"
+      NVIDIA_DRIVER_CAPABILITIES: "all"
     volumes:
       - .:/workspace                      # 映射根目录，调度器代码热更新
       - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
       - ./data:/app/data                  # 映射数据目录
+    deploy:                             # [关键新增] 分配物理 GPU 资源
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     command:
       - /bin/sh
       - -c

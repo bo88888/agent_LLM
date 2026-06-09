@@ -47,8 +47,6 @@ class PipelineRequest(BaseModel):
     tiff_path: str
     requirement_xml_path: str
 
-    output_requirements: Dict[str, Any] = {"format": "json"}
-
 # 接口一：原来的全域底图识别接口 
 @app.post("/api/v1/task/submit")
 async def submit_task(req: PipelineRequest):
@@ -64,7 +62,11 @@ async def submit_task(req: PipelineRequest):
         payload_types=[],
         target_classes=[],
         target_region={},
-        output_requirements=req.output_requirements,
+        output_requirements={
+            "format": "json",
+            "need_confidence": True,
+            "need_suggestion": True
+        },
     )
 
     context = ExecutionContext(request=request)
@@ -72,7 +74,13 @@ async def submit_task(req: PipelineRequest):
     registry = build_registry()
 
     # 2. 规则型 Orchestrator 持有完整上下文，完成理解、动态拆解和可解释规划。
-    context = OrchestratorAgent(registry).prepare(context)
+    context = OrchestratorAgent(registry).prepare(
+        context,
+        overrides={
+            "detection_mode": "base_map",
+            "constraints": {"need_geo_correction": True}
+        }
+    )
 
     # 3. 智能调度执行：并发、重试、失败路由和结构化轨迹。
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
@@ -120,11 +128,16 @@ async def slice_infer(req: SliceRequest):
     request = TaskRequest(
         task_id=f"SLICE_BATCH_{uuid.uuid4().hex[:6]}", 
         tiff_path="", 
+        # 固定位置后续修改
         requirement_xml_path="/workspace/data/requirement.xml", 
-        payload_types=["OPTICAL"],
-        target_classes=["plane", "ship", "vehicle"],
-        target_region={}, 
-        output_requirements={"format": "json"},
+        payload_types=[],    
+        target_classes=[],   
+        target_region={},
+        output_requirements={                 
+            "format": "json",
+            "need_confidence": True,
+            "need_suggestion": True
+        },
     )
     context = ExecutionContext(request=request)
 

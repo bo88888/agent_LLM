@@ -109,7 +109,7 @@ def process_sar_image(input_path, output_path, kernel_size=3, clip_quant=2, n_st
     profile.update(
         dtype=rasterio.uint8,
         count=bands,
-        compress='lzw'  # 可选：压缩输出，减小文件体积
+        compress='lzw'  
     )
 
     with rasterio.open(output_path, 'w', **profile) as dst:

@@ -4,7 +4,6 @@ ENV OMP_NUM_THREADS=8
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/workspace:/app
 WORKDIR /workspace
-COPY requirements.txt .
 COPY . .
 RUN chmod +x /workspace/services/algorithm_service/myprogram || true
 CMD set -eu; \
