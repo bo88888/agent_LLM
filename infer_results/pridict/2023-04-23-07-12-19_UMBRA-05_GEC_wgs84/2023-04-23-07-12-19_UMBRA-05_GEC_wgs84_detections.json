@@ -1,0 +1,29 @@
+{
+    "data": [
+        {
+            "targetName": "yujingji",
+            "leftTopX": 0.639471,
+            "leftTopY": 0.489509,
+            "leftBotX": 0.638694,
+            "leftBotY": 0.481237,
+            "rightTopX": 0.675219,
+            "rightTopY": 0.486052,
+            "rightBotX": 0.674441,
+            "rightBotY": 0.47778,
+            "center_x": 0.656956,
+            "center_y": 0.483645,
+            "leftTopLon": 43.072555,
+            "leftTopLat": 11.601633,
+            "leftBotLon": 43.072519,
+            "leftBotLat": 11.602017,
+            "rightTopLon": 43.074239,
+            "rightTopYLat": 11.601794,
+            "rightBotXLon": 43.074202,
+            "rightBotYLat": 11.602178,
+            "center_Lon": 43.073379,
+            "center_Lat": 11.601906,
+            "confidence": 0.23377,
+            "angle_deg": 174.5545
+        }
+    ]
+}

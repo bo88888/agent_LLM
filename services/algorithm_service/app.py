@@ -8,6 +8,8 @@ from SAR_pro import process_sar_image
 from opt_pro import process_optical_rs_image
 from Optical_detection.infer_OPT_SLD import run_optical_detection
 from Slice_detection.resnet_infer import run_slice_batch_inference
+from SAR_detection.infer_SAR import run_sar_detection
+
 app = FastAPI()
 
 def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -108,10 +110,19 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
              
         object_type = algo_config["type"]
         payload_type = algo_config["payload"]
-        
-        # 动态拼接模型路径
-        model_path = f"/app/Optical_detection/{algo_config['weight']}"
-        print(f"[目标检测] ⚡ 启动真实检测 | 载荷: {payload_type} | 模型: {tool_name} | 目标: {object_type} | 图: {tiff_path}")
+        weigh_model = algo_config["weight"]
+        if payload_type == "sar":
+            model_dir = "/app/SAR_detection"
+            inference_func = run_sar_detection
+            default_conf = 0.25  # SAR 通常背景噪声较大，可设置稍微不同的默认置信度
+        else:
+            model_dir = "/app/Optical_detection"
+            inference_func = run_optical_detection
+            default_conf = 0.20
+
+        model_path = f"{model_dir}/{algo_config['weight']}"
+
+        print(f"[目标检测] ⚡ 启动真实检测 | 载荷: {payload_type} | 算法: {tool_name} | 模型: {weigh_model}| 目标: {object_type} | 图: {tiff_path}")
         
         if not os.path.exists(model_path):
             error_msg = f"未找到模型权重文件: {model_path}，请检查宿主机 Optical_detection 目录下是否有该文件！"
@@ -119,17 +130,16 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             return {"code": 500, "msg": error_msg, "data": {}}
         
         try:
-            # 2. 修改输出目录结构：detect_results / optical / ship
             output_root = os.path.join(os.path.dirname(tiff_path), "detect_results", payload_type, object_type)
-            
+
             # 执行真实的 YOLO 推理
-            raw_result = run_optical_detection(
+            raw_result = inference_func(
                 image_path=tiff_path,
                 model_path=model_path,
                 output_root=output_root,
                 object_type=object_type,
                 payload_type=payload_type, 
-                conf=params.get("conf", 0.2)
+                conf=params.get("conf", default_conf)
             )
          
             # 为检测结果补充调度系统需要的业务字段
@@ -225,17 +235,40 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
         elif tool_name == "geo_correction_service":
             print(f"[预处理] P3 执行几何精矫正，input_data: {input_data.keys()}")
             target_class = params.get("target_class")
-            GEOMETRIC_BASE_MAP_MAP = {
-                "ship": "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif",
-                "plane": "/app/data/sample_packet/jiayi_ref.tif",
-                "vehicle": "/app/data/sample_packet/vehicle_ref.tif"
-            }
+            previous_results = input_data.get("previous_results", {})
+            payload_type = params.get("payload_type")
+            if not payload_type:
+                for res_content in previous_results.values():
+                    if res_content.get("sar_denoised_path"):
+                        payload_type = "sar"
+                        break
+                    elif res_content.get("optical_enhanced_path"):
+                        payload_type = "optical"
+                        break
+
+            if payload_type == "sar":
+                GEOMETRIC_BASE_MAP_MAP = {
+                    "ship": "/app/data/sample_packet/2023-04-23-07-12-19_UMBRA-05_GEC_wgs84_ref.tif",
+                    "plane": "/app/data/sample_packet/jiayi_SAR_ref.tif",      # 需确保宿主机有此 SAR 基准图
+                    "vehicle": "/app/data/sample_packet/20220109-sarcar_wgs84_ref.tif"   # 需确保宿主机有此 SAR 基准图
+                }
+            else:
+                GEOMETRIC_BASE_MAP_MAP = {
+                    "ship": "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif",
+                    "plane": "/app/data/sample_packet/jiayi_ref.tif",
+                    "vehicle": "/app/data/sample_packet/vehicle_ref.tif"
+                }
+
             base_map_path = GEOMETRIC_BASE_MAP_MAP.get(target_class)
 
-            previous_results = input_data.get("previous_results", {})
+
             images_to_correct = []
             for res_content in previous_results.values():
-                path = res_content.get("optical_enhanced_path") or res_content.get("sar_denoised_path")
+                if payload_type == "sar":
+                    path = res_content.get("sar_denoised_path")
+                else:
+                    path = res_content.get("optical_enhanced_path")
+                    
                 if path: images_to_correct.append(path)
             
             if not images_to_correct:

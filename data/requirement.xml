@@ -5,15 +5,15 @@
     <detection_mode>base_map</detection_mode>
 
     <payload_types>
-        <!-- <type>SAR</type> -->
-        <type>OPTICAL</type>
+        <type>SAR</type>
+        <!-- <type>OPTICAL</type> -->
         <!-- <type>ELINT</type> -->
     </payload_types>
 
     <target_classes>
-        <class>plane</class>三
+        <!-- <class>plane</class>三 -->
         <!-- <class>ship</class> -->
-        <!-- <class>vehicle</class> -->
+        <class>vehicle</class>
     </target_classes>
 
     <!-- <target_region>
