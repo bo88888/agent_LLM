@@ -11,7 +11,7 @@
     </payload_types>
 
     <target_classes>
-        <class>plane</class>
+        <class>plane</class>三
         <!-- <class>ship</class> -->
         <!-- <class>vehicle</class> -->
     </target_classes>

@@ -51,10 +51,6 @@ class PipelineRequest(BaseModel):
 @app.post("/api/v1/task/submit")
 async def submit_task(req: PipelineRequest):
     start_time = time.time()
-
-    """
-    前端调用此接口启动整个流水线，返回最终的 JSON 报告
-    """
     task_id = req.task_id.strip() if req.task_id else f"TASK_{uuid.uuid4().hex[:6]}"
 
     request = TaskRequest(
@@ -70,7 +66,6 @@ async def submit_task(req: PipelineRequest):
             "need_suggestion": True
         },
     )
-
     context = ExecutionContext(request=request)
 
     registry = build_registry()
@@ -105,7 +100,10 @@ async def submit_task(req: PipelineRequest):
         "task_id": task_id,
         "detection_time": finish_time,     
         "time_cost_seconds": time_cost,    
-        "data": raw_report["data"]         
+        "data": raw_report["data"],
+        "orchestration": raw_report["orchestration"],
+        "execution_status":raw_report["execution_status"]
+                 
     }
 
     output_dir = Path("outputs")
