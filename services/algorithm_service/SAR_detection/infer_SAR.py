@@ -627,5 +627,5 @@ if __name__ == '__main__':
     
     
 # python infer_OPT_SLD.py --model_path /home/air/Code/SLD_Yolo/Opt/runs/silei_ship_obb/weights/best.pt --source datasets/test_img/ --output_root infer_results/pridict --object_type ship --crop_save_dir infer_results/crop
-# python services/algorithm_service/Optical_detection/infer_OPT_SLD_V2.py --model_path services/algorithm_service/Optical_detection/best_plane.pt --source data/sample_packet/geo_correction_jiayi_wgs84_optical_enhanced.tif --output_root infer_results/pridict --object_type plane
+# python services/algorithm_service/SAR_detection/infer_SAR.py --model_path services/algorithm_service/SAR_detection/best_sar_ship.pt --source data/sample_packet/2023-04-23-07-12-19_UMBRA-05_GEC_wgs84.tif --output_root infer_results/pridict --object_type plane
 

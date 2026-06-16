@@ -101,8 +101,8 @@ async def submit_task(req: PipelineRequest):
         "detection_time": finish_time,     
         "time_cost_seconds": time_cost,    
         "data": raw_report["data"],
-        "orchestration": raw_report["orchestration"],
-        "execution_status":raw_report["execution_status"]
+        # "orchestration": raw_report["orchestration"],
+        # "execution_status":raw_report["execution_status"]
                  
     }
 
