@@ -4,19 +4,19 @@ services:
     image: huo-infer-v8:v4
     container_name: multi_payload_app
     working_dir: /workspace
-    runtime: nvidia
+    runtime: nvidia # GPU
     ports:
-      - "9000:9000"  
+      - "9001:9000"  
     environment:
       OMP_NUM_THREADS: "8"
       PYTHONUNBUFFERED: "1"
-      NVIDIA_VISIBLE_DEVICES: "all"
-      NVIDIA_DRIVER_CAPABILITIES: "all"
+      NVIDIA_VISIBLE_DEVICES: "all" # GPU
+      NVIDIA_DRIVER_CAPABILITIES: "all" # GPU
     volumes:
       - .:/workspace                      # 映射根目录，调度器代码热更新
       - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
       - ./data:/app/data                  # 映射数据目录
-    deploy:                             # [关键新增] 分配物理 GPU 资源
+    deploy:                             #  GPU 
       resources:
         reservations:
           devices:
@@ -40,6 +40,12 @@ services:
         api_pid=$$!
         trap 'kill "$$api_pid" 2>/dev/null || true' EXIT
 
+        # # mock 
+        # cd /workspace/services/mock_all_service
+        # python -m uvicorn app:app --host 0.0.0.0 --port 8888 --reload --reload-dir /workspace/services/mock_all_service &
+        # api_pid=$$!
+        # trap 'kill "$$api_pid" 2>/dev/null || true' EXIT
+
         # 3. 等待算法服务就绪
         echo "Waiting for algorithm service to start..."
         retry_count=0
@@ -55,7 +61,6 @@ services:
 
         # 4.  前台启动主调度器 API (开启 --reload)
         cd /workspace
-        # 注意：这里假设你的文件名为 main.py 且里面定义了 app = FastAPI(...)
         python -m uvicorn api_main:app --host 0.0.0.0 --port 9000 --reload --reload-dir /workspace
-        
+
     restart: "no"

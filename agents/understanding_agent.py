@@ -27,13 +27,13 @@ class UnderstandingAgent:
             # 直接使用 API 前端传来的单张图片路径
             "tiff_path": context.request.tiff_path,
             
-            "target_region": normalize_target_region({
-                "lon": root.findtext('target_region/lon'),
-                "lat": root.findtext('target_region/lat'),
-                "radius_km": root.findtext('target_region/radius_km')
-            }),
+            # "target_region": normalize_target_region({
+            #     "lon": root.findtext('target_region/lon'),
+            #     "lat": root.findtext('target_region/lat'),
+            #     "radius_km": root.findtext('target_region/radius_km')
+            # }),
             
-            "slice_size": context.request.slice_size,
+            # "slice_size": context.request.slice_size,
             "output_requirements": context.request.output_requirements,
             "constraints": {"need_geo_correction": True},
         }

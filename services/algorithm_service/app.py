@@ -252,7 +252,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                     "plane": "/app/data/sample_packet/jiayi_SAR_ref.tif",     
                     "vehicle": "/app/data/sample_packet/20220109-sarcar_wgs84_ref.tif"   
                 }
-            else:
+            elif payload_type == "optical":
                 GEOMETRIC_BASE_MAP_MAP = {
                     "ship": "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif",
                     "plane": "/app/data/sample_packet/jiayi_ref.tif",

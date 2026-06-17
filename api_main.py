@@ -59,7 +59,7 @@ async def submit_task(req: PipelineRequest):
         requirement_xml_path=req.requirement_xml_path,
         payload_types=[],
         target_classes=[],
-        target_region={},
+        # target_region={},
         output_requirements={
             "format": "json",
             "need_confidence": True,
