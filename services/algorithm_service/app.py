@@ -245,12 +245,12 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                     elif res_content.get("optical_enhanced_path"):
                         payload_type = "optical"
                         break
-
+          
             if payload_type == "sar":
                 GEOMETRIC_BASE_MAP_MAP = {
-                    "ship": "/app/data/sample_packet/2023-04-23-07-12-19_UMBRA-05_GEC_wgs84_ref.tif",
-                    "plane": "/app/data/sample_packet/jiayi_SAR_ref.tif",      # 需确保宿主机有此 SAR 基准图
-                    "vehicle": "/app/data/sample_packet/20220109-sarcar_wgs84_ref.tif"   # 需确保宿主机有此 SAR 基准图
+                    "ship": "/app/data/sample_packet/2023-08-10-13-17-17_UMBRA-05_GEC_wgs84_ref.tif",
+                    "plane": "/app/data/sample_packet/jiayi_SAR_ref.tif",     
+                    "vehicle": "/app/data/sample_packet/20220109-sarcar_wgs84_ref.tif"   
                 }
             else:
                 GEOMETRIC_BASE_MAP_MAP = {
@@ -263,6 +263,7 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
 
 
             images_to_correct = []
+
             for res_content in previous_results.values():
                 if payload_type == "sar":
                     path = res_content.get("sar_denoised_path")
@@ -365,6 +366,7 @@ def run_elint_detection(region: dict) -> dict:
         "auxInterpretationInfo": "电子侦察原始检出"
     }
     
+
     return {
         "code": 200, 
         "msg": "ELINT detection finished", 
@@ -374,6 +376,7 @@ def run_elint_detection(region: dict) -> dict:
 # ==========================================
 # 4. MCP 格式封装 
 # ==========================================
+
 def build_mcp_response(subtask_id: str, tool_name: str, algo_response: dict) -> dict:
     response = {
         "subtask_id": subtask_id,

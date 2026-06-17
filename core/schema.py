@@ -18,8 +18,8 @@ class TaskRequest:
     requirement_xml_path: str
     payload_types: List[str] = field(default_factory=list)
     target_classes: List[str] = field(default_factory=list)
-    target_region: Dict[str, Any] = field(default_factory=dict)
-    slice_size: str = "1k*1k"
+    # target_region: Dict[str, Any] = field(default_factory=dict)
+    # slice_size: str = "1k*1k"
     output_requirements: Dict[str, Any] = field(default_factory=dict)
 
 

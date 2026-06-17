@@ -12,8 +12,8 @@
 
     <target_classes>
         <!-- <class>plane</class>三 -->
-        <!-- <class>ship</class> -->
-        <class>vehicle</class>
+        <class>ship</class>
+        <!-- <class>vehicle</class> -->
     </target_classes>
 
     <!-- <target_region>

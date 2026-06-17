@@ -8,8 +8,8 @@ import traceback
 # ==========================================
 # 1. 基础配置
 # ==========================================
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"[切片算法] 当前使用的设备: {DEVICE}")
+# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# print(f"[切片算法] 当前使用的设备: {DEVICE}")
 
 # 必须和训练集类别顺序保持完全一致！
 CLASS_NAMES = ['BHship', 'HJship', 'aircraft_carrier', 'amphibious', 'cruiser', 'depot_ship', 'destroyer', 'huweijian', 'minchuan', 'other_junchuan', 'xujing']

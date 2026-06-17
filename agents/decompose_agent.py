@@ -20,7 +20,6 @@ DETECTION_TASK_IDS = {
     ("ELINT", ""): "D7",
 }
 
-
 class DecomposeAgent:
     """任务拆解智能体。
     负责把“一个总任务”拆成多个可调度的 SubTask。

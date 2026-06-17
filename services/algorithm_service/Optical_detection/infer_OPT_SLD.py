@@ -586,9 +586,11 @@ def main():
     print(f"所有结果汇总保存: {summary_json_path}")
     print(f"处理完成！结果目录: {args.output_root}")
 
-def run_optical_detection(image_path, model_path, output_root, object_type, payload_type='optical', conf=0.2, crop_save_dir=''):
+def run_optical_detection(image_path, model_path, output_root, object_type, payload_type='optical', 
+                      conf=0.2, nms_iou=0.3, tile_size=2048, overlap=400, large_threshold=4096, 
+                      crop_save_dir=''):
     model = YOLO(model_path)
-    
+
     # 🚀 新增：自动判断模型类型（OBB还是HBB）
     is_obb = model.task == "obb"
     print(f"[{payload_type}] 检测任务启动，模型类型: {'旋转框OBB' if is_obb else '水平框HBB'}")
@@ -612,14 +614,13 @@ def run_optical_detection(image_path, model_path, output_root, object_type, payl
     # 获取地理坐标
     [lat0, lon0, lat1, lon1] = get_tif_corners_latlon(image_path)
     
-
     output_data = process_image(
-        model, image_path, conf, 0.3, 1024, 128, 4096,
+        model, image_path, conf, nms_iou, tile_size, overlap, large_threshold,
         class_names, output_root, lat0, lon0, lat1, lon1, 
         is_obb=is_obb, 
         crop_dir=crop_save_dir
     )
-    
+
     return output_data
 
 if __name__ == '__main__':

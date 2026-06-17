@@ -585,10 +585,11 @@ def main():
         json.dump(all_results, f, ensure_ascii=False, indent=4, default=numpy_serializer)
     print(f"所有结果汇总保存: {summary_json_path}")
     print(f"处理完成！结果目录: {args.output_root}")
-
-def run_sar_detection(image_path, model_path, output_root, object_type, payload_type='optical', conf=0.2, crop_save_dir=''):
+def run_sar_detection(image_path, model_path, output_root, object_type, payload_type='optical', 
+                      conf=0.2, nms_iou=0.3, tile_size=2048, overlap=400, large_threshold=4096, 
+                      crop_save_dir=''):
     model = YOLO(model_path)
-    
+
     # 🚀 新增：自动判断模型类型（OBB还是HBB）
     is_obb = model.task == "obb"
     print(f"[{payload_type}] 检测任务启动，模型类型: {'旋转框OBB' if is_obb else '水平框HBB'}")
@@ -612,14 +613,13 @@ def run_sar_detection(image_path, model_path, output_root, object_type, payload_
     # 获取地理坐标
     [lat0, lon0, lat1, lon1] = get_tif_corners_latlon(image_path)
     
-
     output_data = process_image(
-        model, image_path, conf, 0.3, 1024, 128, 4096,
+        model, image_path, conf, nms_iou, tile_size, overlap, large_threshold,
         class_names, output_root, lat0, lon0, lat1, lon1, 
         is_obb=is_obb, 
         crop_dir=crop_save_dir
     )
-    
+
     return output_data
 
 if __name__ == '__main__':
@@ -627,5 +627,5 @@ if __name__ == '__main__':
     
     
 # python infer_OPT_SLD.py --model_path /home/air/Code/SLD_Yolo/Opt/runs/silei_ship_obb/weights/best.pt --source datasets/test_img/ --output_root infer_results/pridict --object_type ship --crop_save_dir infer_results/crop
-# python services/algorithm_service/SAR_detection/infer_SAR.py --model_path services/algorithm_service/SAR_detection/best_sar_ship.pt --source data/sample_packet/2023-04-23-07-12-19_UMBRA-05_GEC_wgs84.tif --output_root infer_results/pridict --object_type plane
+# python services/algorithm_service/SAR_detection/infer_SAR.py --model_path services/algorithm_service/SAR_detection/best_sar_ship.pt --source data/sample_packet/2023-04-23-07-12-19_UMBRA-05_GEC_wgs84.tif --output_root infer_results/pridict --object_type plane --tile_size 2048
 
