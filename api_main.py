@@ -119,6 +119,8 @@ async def submit_task(req: PipelineRequest):
 
 
 class SliceRequest(BaseModel):
+    payloadType: str
+    targetClass: str
     pointPath: List[str]
 
 # 接口二：切片目标识别接口
@@ -126,17 +128,22 @@ class SliceRequest(BaseModel):
 
 async def slice_infer(req: SliceRequest):
     start_time = time.time()
-    all_extracted_targets = []  # 用于存放所有切片跑出来的目标大池子
+    all_extracted_targets = []  
     print(f"🚀 收到切片批量处理请求，共计 {len(req.pointPath)} 张切片")
+
+    payload_type = req.payloadType.strip().upper()
+    target_class = req.targetClass.strip().lower()
 
     request = TaskRequest(
         task_id=f"SLICE_BATCH_{uuid.uuid4().hex[:6]}", 
         tiff_path="", 
         # 固定位置后续修改
         requirement_xml_path="/workspace/data/requirement.xml", 
-        payload_types=[],    
-        target_classes=[],   
-        target_region={},
+        
+        payload_types=[payload_type],
+        target_classes=[target_class],
+
+        # target_region={},
         output_requirements={                 
             "format": "json",
             "need_confidence": True,
@@ -152,7 +159,11 @@ async def slice_infer(req: SliceRequest):
         context,
         overrides={
             "detection_mode": "slice",
-            "slice_inputs": {"pointPathList": req.pointPath},
+            "slice_inputs": {
+                "pointPath": req.pointPath,
+                "payloadType": payload_type,
+                "targetClass": target_class},
+                
             "constraints": {"need_geo_correction": False},
         },
     )

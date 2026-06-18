@@ -433,6 +433,20 @@ def slice_infer_endpoint(payload: Dict[str, Any]):
     tool_name = payload.get("tool_name", "")
     subtask_id = payload.get("subtask_id", "")
     params = payload.get("parameters", {})
-    slice_paths = params.get("pointPathList", []) 
-    algo_response = run_slice_batch_inference(slice_paths, tool_name)
+
+    slice_paths = params.get("pointPath", [])
+
+    # 从调度器传入的参数中读取载荷类型和目标类别
+    payload_type = params.get("payloadType", "")
+    target_class = params.get("targetClass", "")
+    # 打印调试信息，确保参数顺利到达底层
+    print(f"\n[调试] 准备执行切片推理 | 工具: {tool_name}")
+    print(f"[调试] 提取到的参数 -> PayloadType: {payload_type}, TargetClass: {target_class}, 路径数量: {len(slice_paths)}\n")
+    algo_response = run_slice_batch_inference(
+        slice_paths=slice_paths,
+        tool_name=tool_name,
+        payload_type=payload_type,
+        target_class=target_class
+    )
+
     return build_mcp_response(subtask_id, tool_name, algo_response)
