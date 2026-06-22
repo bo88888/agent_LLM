@@ -117,91 +117,161 @@ async def submit_task(req: PipelineRequest):
     return clean_report
 
 
+class SlicePathItem(BaseModel):
+    id: str
+    path: str
 
 class SliceRequest(BaseModel):
     payloadType: str
     targetClass: str
-    pointPath: List[str]
+    pointPath: List[SlicePathItem]
+    baseMapPath: str = ""
+    requirement_xml_path: str = "/workspace/data/requirement.xml"
 
-# 接口二：切片目标识别接口
+# 接口二：切片 + 大区域底图联合识别接口
 @app.post("/api/v1/task/slice_infer")
-
 async def slice_infer(req: SliceRequest):
     start_time = time.time()
-    all_extracted_targets = []  
-    print(f"🚀 收到切片批量处理请求，共计 {len(req.pointPath)} 张切片")
 
     payload_type = req.payloadType.strip().upper()
     target_class = req.targetClass.strip().lower()
+    task_id = f"SLICE_FUSION_{uuid.uuid4().hex[:6]}"
+     # 提取切片路径和切片 ID 映射
+    slice_items = req.pointPath
+    slice_paths = [item.path for item in slice_items]
+    slice_id_map = {
+        item.path: item.id
+        for item in slice_items
+    }
+    registry = build_registry()
+    invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
+    scheduler = IntelligentScheduler(invoker, ReplanDecisionAgent())
 
-    request = TaskRequest(
-        task_id=f"SLICE_BATCH_{uuid.uuid4().hex[:6]}", 
-        tiff_path="", 
-        # 固定位置后续修改
-        requirement_xml_path="/workspace/data/requirement.xml", 
-        
+    all_current_targets = []
+
+    # =========================
+    # 1. 大区域底图识别流程
+    # =========================
+    if req.baseMapPath:
+        base_request = TaskRequest(
+            task_id=f"{task_id}_BASE",
+            tiff_path=req.baseMapPath,
+            requirement_xml_path=req.requirement_xml_path,
+            payload_types=[payload_type],
+            target_classes=[target_class],
+            output_requirements={
+                "format": "json",
+                "need_confidence": True,
+                "need_suggestion": True
+            },
+        )
+
+        base_context = ExecutionContext(request=base_request)
+
+        base_context = OrchestratorAgent(registry).prepare(
+            base_context,
+            overrides={
+                "detection_mode": "base_map",
+                "payload_types": [payload_type],
+                "target_classes": [target_class],
+                "constraints": {"need_geo_correction": True}
+            }
+        )
+
+        base_context = await scheduler.run_async(base_context)
+        base_context = PostprocessAgent().run(base_context)
+
+        base_targets = base_context.metadata.get("fused_targets", [])
+
+        for t in base_targets:
+            t["resultSource"] = "base_map"
+
+        all_current_targets.extend(base_targets)
+
+    # =========================
+    # 2. 切片识别流程
+    # =========================
+    slice_request = TaskRequest(
+        task_id=f"{task_id}_SLICE",
+        tiff_path="",
+        requirement_xml_path=req.requirement_xml_path,
         payload_types=[payload_type],
-        target_classes=[target_class],
+        
 
-        # target_region={},
-        output_requirements={                 
+        target_classes=[target_class],
+        output_requirements={
             "format": "json",
             "need_confidence": True,
             "need_suggestion": True
         },
     )
-    context = ExecutionContext(request=request)
 
-    registry = build_registry()
+    slice_context = ExecutionContext(request=slice_request)
 
-    # 2. 通过 Orchestrator 注入切片模式覆盖项，再动态生成切片 DAG。
-    context = OrchestratorAgent(registry).prepare(
-        context,
+    slice_context = OrchestratorAgent(registry).prepare(
+        slice_context,
         overrides={
             "detection_mode": "slice",
             "slice_inputs": {
-                "pointPath": req.pointPath,
+                "pointPath": slice_paths,
                 "payloadType": payload_type,
-                "targetClass": target_class},
-                
+                "targetClass": target_class
+            },
             "constraints": {"need_geo_correction": False},
-        },
+        }
     )
 
-    # 3. 执行智能调度
-    invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
-    scheduler = IntelligentScheduler(invoker, ReplanDecisionAgent())
-    context = await scheduler.run_async(context)
+    slice_context = await scheduler.run_async(slice_context)
+    slice_context = PostprocessAgent().run(slice_context)
 
-    # 4. 后处理提取目标数据，并生成质量评估。
-    context = PostprocessAgent().run(context)
-    context = ReportAgent().run(context)
-    all_extracted_targets = context.metadata.get("fused_targets", [])
+    slice_targets = slice_context.metadata.get("fused_targets", [])
+    
+    for t in slice_targets:
+        slice_path = t.get("slicePath", "")
+        t["id"] = slice_id_map.get(slice_path, "")
+        t["resultSource"] = "slice"
+        
+
+
+    all_current_targets.extend(slice_targets)
+
+    # =========================
+    # 3. 待增加融合部分
+    # =========================
+    final_targets = all_current_targets
+
+    # 后续可以改成：
+    # final_targets = run_qb_fusion(all_current_targets)
+    # final_targets = run_history_pool_fusion(
+    #     current_targets=final_targets,
+    #     task_id=task_id,
+    #     region={}
+    # )
 
     end_time = time.time()
     time_cost = round(end_time - start_time, 2)
     finish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    output_dir = Path("outputs")
-    output_dir.mkdir(parents=True, exist_ok=True)  
-    report_path = output_dir / f"report_slice.json"
-
     final_response = {
         "code": 200,
-        "msg": f"success, batch processed {len(req.pointPath)} slices",
-        "detection_time": finish_time,          # ✨ 时间放前面
-        "time_cost_seconds": time_cost,         # ✨ 耗时放前面
-        "data": all_extracted_targets,
-        # 调试时取消下面两行注释。
-        # "quality_report": context.quality_report,
-        # "orchestration": build_orchestration_payload(context),
+        "msg": f"success, processed base map and {len(req.pointPath)} slices",
+        "task_id": task_id,
+        "detection_time": finish_time,
+        "time_cost_seconds": time_cost,
+        "data": final_targets
     }
+
+    output_dir = Path("outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    report_path = output_dir / f"report_slice_{task_id}.json"
 
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(final_response, f, ensure_ascii=False, indent=2)
 
-    return final_response
+    print(f"✅ 联合识别报告已保存至: {report_path}")
 
+    return final_response
 
 if __name__ == "__main__":
     import uvicorn
