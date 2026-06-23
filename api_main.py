@@ -138,11 +138,13 @@ async def slice_infer(req: SliceRequest):
     task_id = f"SLICE_FUSION_{uuid.uuid4().hex[:6]}"
      # 提取切片路径和切片 ID 映射
     slice_items = req.pointPath
-    slice_paths = [item.path for item in slice_items]
-    slice_id_map = {
-        item.path: item.id
+    slice_paths = [
+        {
+            "id": item.id,
+            "path": item.path,
+        }
         for item in slice_items
-    }
+    ]
     registry = build_registry()
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
     scheduler = IntelligentScheduler(invoker, ReplanDecisionAgent())
@@ -182,10 +184,6 @@ async def slice_infer(req: SliceRequest):
         base_context = PostprocessAgent().run(base_context)
 
         base_targets = base_context.metadata.get("fused_targets", [])
-
-        for t in base_targets:
-            t["resultSource"] = "base_map"
-
         all_current_targets.extend(base_targets)
 
     # =========================
@@ -196,8 +194,6 @@ async def slice_infer(req: SliceRequest):
         tiff_path="",
         requirement_xml_path=req.requirement_xml_path,
         payload_types=[payload_type],
-        
-
         target_classes=[target_class],
         output_requirements={
             "format": "json",
@@ -223,16 +219,7 @@ async def slice_infer(req: SliceRequest):
 
     slice_context = await scheduler.run_async(slice_context)
     slice_context = PostprocessAgent().run(slice_context)
-
     slice_targets = slice_context.metadata.get("fused_targets", [])
-    
-    for t in slice_targets:
-        slice_path = t.get("slicePath", "")
-        t["id"] = slice_id_map.get(slice_path, "")
-        t["resultSource"] = "slice"
-        
-
-
     all_current_targets.extend(slice_targets)
 
     # =========================
@@ -252,9 +239,16 @@ async def slice_infer(req: SliceRequest):
     time_cost = round(end_time - start_time, 2)
     finish_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    if not slice_targets:
+        response_code = 500
+        response_msg = f"failed, no valid slice targets returned from {len(req.pointPath)} slices"
+    else:
+        response_code = 200
+        response_msg = f"success, processed {len(req.pointPath)} slices"
+
     final_response = {
-        "code": 200,
-        "msg": f"success, processed base map and {len(req.pointPath)} slices",
+        "code": response_code,
+        "msg": response_msg,
         "task_id": task_id,
         "detection_time": finish_time,
         "time_cost_seconds": time_cost,
