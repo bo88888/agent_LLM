@@ -16,6 +16,7 @@ services:
       - .:/workspace                      # 映射根目录，调度器代码热更新
       - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
       - ./data:/app/data                  # 映射数据目录
+      - "/home/air:/home/air"
     deploy:                             #  GPU 
       resources:
         reservations:
