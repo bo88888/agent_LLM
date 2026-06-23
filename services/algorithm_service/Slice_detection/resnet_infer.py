@@ -76,8 +76,6 @@ TARGET_CLASS_NAMES = {
     "vehicle": get_resnet_class_by_type("vehicle"),
 }
 
-# 如果当前权重仍然是按原始完整训练集保存的，输出层里可能包含前端不会传的类别索引。
-# 这里仅记录这些索引，用于推理时屏蔽，不参与最终输出。
 FULL_CLASS_COUNT_BY_TARGET = {
     "ship": 11,
     "plane": 10,
