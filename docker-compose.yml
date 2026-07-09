@@ -12,6 +12,13 @@ services:
       PYTHONUNBUFFERED: "1"
       NVIDIA_VISIBLE_DEVICES: "all" # GPU
       NVIDIA_DRIVER_CAPABILITIES: "all" # GPU
+      
+      MYSQL_HOST: "172.17.0.1"
+      MYSQL_PORT: "3306"
+      MYSQL_USER: "air"
+      MYSQL_PASSWORD: "123"
+      MYSQL_DATABASE: "agent"
+    
     volumes:
       - .:/workspace                      # 映射根目录，调度器代码热更新
       - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
