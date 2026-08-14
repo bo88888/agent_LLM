@@ -249,7 +249,7 @@ def save_crop_patch(crop_img, img_name, idx, cls_name, conf, save_root):
     save_path = os.path.join(save_root, save_name)
 
     cv2.imwrite(save_path, crop_img)
-
+    return save_path
 
 def load_slice_classifier(payload_type, object_type):
     """
@@ -358,7 +358,7 @@ def reclassify_detections_by_slice_model(image, detections, img_name, slice_clas
         new_det["class_name"] = res_cls
         new_det["confidence"] = res_conf
 
-        save_crop_patch(
+        slice_path = save_crop_patch(
             crop_img=crop_patch,
             img_name=img_name,
             idx=idx,
@@ -366,7 +366,7 @@ def reclassify_detections_by_slice_model(image, detections, img_name, slice_clas
             conf=res_conf,
             save_root=crop_dir
         )
-
+        new_det["slicePath"] = slice_path
         reclassified_dets.append(new_det)
 
     print(f"切片 ResNet 二次分类完成，最终有效目标 {len(reclassified_dets)} 个")
@@ -553,6 +553,11 @@ def process_image(
     os.makedirs(output_root, exist_ok=True)
     result_dir = os.path.join(output_root, get_unique_dir_name(output_root, img_name))
     os.makedirs(result_dir, exist_ok=True)
+    # 增加绝对路径 
+    if not crop_dir:
+        crop_dir = os.path.join(result_dir, "target_slices")
+    crop_dir = os.path.abspath(crop_dir)
+    os.makedirs(crop_dir, exist_ok=True)
 
     print(f"处理图像: {image_path} (尺寸: {img_width}x{img_height})")
     print(f"模型类型: {'OBB(旋转框)' if is_obb else 'HBB(水平框)'}")
@@ -794,6 +799,7 @@ def process_image(
 
         target_data = {
             "targetName": det["class_name"],
+            "slicePath": det.get("slicePath"),
             "leftTopX": lt_x_per,
             "leftTopY": lt_y_per,
             "leftBotX": lb_x_per,
