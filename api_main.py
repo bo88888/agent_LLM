@@ -75,14 +75,23 @@ async def submit_task(req: PipelineRequest):
     registry = build_registry()
 
     # 2. 规则型 Orchestrator 持有完整上下文，完成理解、动态拆解和可解释规划。
-    context = OrchestratorAgent(registry).prepare_with_llm(
+    context = await OrchestratorAgent(registry).prepare_with_llm(
         context,
         overrides={
             "detection_mode": "base_map",
             # "constraints": {"need_geo_correction": True}
         }
     )
-
+    if context.metadata.get("need_clarification"):
+        return {
+            "code": 202,
+            "msg": "need_clarification",
+            "task_id": task_id,
+            "questions": context.metadata.get(
+                "clarification_questions",
+                [],
+            )
+        }
     # 3. 智能调度执行：并发、重试、失败路由和结构化轨迹。
     invoker = InvokerAgent(registry, timeout=HTTP_TIMEOUT)
     scheduler = IntelligentScheduler(invoker, ReplanDecisionAgent())

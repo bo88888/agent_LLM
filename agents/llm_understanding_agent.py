@@ -72,6 +72,25 @@ class LLMUnderstandingAgent:
 
 10. 如果信息不明确，不要编造具体数值。
 
+11. payload_types 和 target_classes 只允许根据【用户指令】进行提取。
+
+12. XML任务上下文仅作为背景信息提供给你，
+不得因为XML中存在某个payload_types或target_classes，
+就把用户指令中没有明确表达的内容复制到输出。
+
+13. 如果用户指令没有明确说明 SAR、OPTICAL 或 ELINT，
+payload_types 必须返回空列表 []。
+
+14. 如果用户指令没有明确说明飞机、舰船或车辆目标，
+target_classes 必须返回空列表 []。
+
+15. 不允许根据目标类别推测载荷类型。
+例如用户只说“识别舰船”，不能自行推断为SAR，
+因为舰船可能来自SAR影像，也可能来自光学影像。
+
+16. XML中的payload_types和target_classes由后续程序负责
+与用户指令进行一致性检查，你只负责提取用户明确表达的需求。
+
 必须严格符合下面 JSON Schema：
 
 {json.dumps(schema, ensure_ascii=False)}
