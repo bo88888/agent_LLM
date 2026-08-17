@@ -15,7 +15,8 @@ from config import HTTP_TIMEOUT, TOOL_SERVICE_MAP
 from mcp.registry import ToolRegistry
 from agents.invoker_agent import InvokerAgent
 from scheduler.scheduler_center import IntelligentScheduler
-
+from agents.llm_understanding_agent import LLMUnderstandingAgent
+from clients.ollama_client import OllamaClient
 
 app = FastAPI(title="智能体多载荷调度中心 API")
 
@@ -44,6 +45,7 @@ def build_frontend_report(context: ExecutionContext) -> Dict[str, Any]:
 # 定义前端传过来的数据结构
 class PipelineRequest(BaseModel):
     task_id: str = ""
+    instruction: str = ""
     tiff_path: str
     requirement_xml_path: str
 
@@ -55,6 +57,8 @@ async def submit_task(req: PipelineRequest):
 
     request = TaskRequest(
         task_id=task_id,
+        instruction=req.instruction,
+
         tiff_path=req.tiff_path,
         requirement_xml_path=req.requirement_xml_path,
         payload_types=[],
@@ -71,11 +75,11 @@ async def submit_task(req: PipelineRequest):
     registry = build_registry()
 
     # 2. 规则型 Orchestrator 持有完整上下文，完成理解、动态拆解和可解释规划。
-    context = OrchestratorAgent(registry).prepare(
+    context = OrchestratorAgent(registry).prepare_with_llm(
         context,
         overrides={
             "detection_mode": "base_map",
-            "constraints": {"need_geo_correction": True}
+            # "constraints": {"need_geo_correction": True}
         }
     )
 
@@ -266,6 +270,68 @@ async def slice_infer(req: SliceRequest):
     print(f"✅ 联合识别报告已保存至: {report_path}")
 
     return final_response
+
+
+class LLMUnderstandRequest(BaseModel):
+    instruction: str
+    task_context: Dict[str, Any] = {}
+
+@app.get("/api/v1/llm/health")
+async def llm_health():
+
+    client = OllamaClient()
+
+    try:
+        result = await client.health_check()
+
+        models = [
+            model.get("name")
+            for model in result.get("models", [])
+        ]
+
+        return {
+            "code": 200,
+            "msg": "Ollama connected",
+            "models": models,
+        }
+
+    except Exception as exc:
+        return {
+            "code": 500,
+            "msg": str(exc),
+        }
+@app.post("/api/v1/llm/understand")
+async def llm_understand(req: LLMUnderstandRequest):
+
+    agent = LLMUnderstandingAgent()
+
+    try:
+        requirement = await agent.run(
+            user_instruction=req.instruction,
+            task_context=req.task_context,
+        )
+
+        # Pydantic v2
+        if hasattr(requirement, "model_dump"):
+            data = requirement.model_dump()
+
+        # Pydantic v1
+        else:
+            data = requirement.dict()
+
+        return {
+            "code": 200,
+            "msg": "success",
+            "data": data,
+        }
+
+    except Exception as exc:
+        return {
+            "code": 500,
+            "msg": str(exc),
+            "data": None,
+        }
+
 
 if __name__ == "__main__":
     import uvicorn

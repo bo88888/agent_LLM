@@ -1,0 +1,115 @@
+import json
+from typing import Any, Dict
+
+from clients.ollama_client import OllamaClient
+from core.llm_schema import RequirementSpec
+
+
+class LLMUnderstandingAgent:
+    """
+    LLM 需求理解智能体。
+
+    输入：
+        用户自然语言
+        XML解析结果
+        任务上下文
+
+    输出：
+        RequirementSpec
+    """
+
+    def __init__(self, llm_client=None):
+        self.llm = llm_client or OllamaClient()
+
+    async def run(
+        self,
+        user_instruction: str,
+        xml_context: Dict[str, Any] | None = None,
+        task_context: Dict[str, Any] | None = None,
+    ) -> RequirementSpec:
+
+        xml_context = xml_context or {}
+        task_context = task_context or {}
+
+        schema = OllamaClient._model_schema(
+            RequirementSpec
+        )
+
+        system_prompt = f"""
+你是一个智能任务需求理解智能体。
+
+你的任务是将用户自然语言任务转换为严格结构化的任务需求。
+
+必须遵守以下规则：
+
+1. payload_types 只能使用：
+   SAR、OPTICAL、ELINT。
+
+2. target_classes 只能使用：
+   plane、ship、vehicle。
+
+3. 用户说“光学”“可见光”“光学影像”时，
+   统一映射为 OPTICAL。
+
+4. 用户说“飞机”“飞行器”时，
+   统一映射为 plane。
+
+5. 用户说“舰船”“船舶”时，
+   统一映射为 ship。
+
+6. 用户说“车辆”“汽车”时，
+   统一映射为 vehicle。
+
+7. 不允许虚构用户没有提出的硬性时间限制。
+
+8. required_capabilities 可以使用：
+   preprocess
+   geometry
+   detect
+
+9. 如果是 SAR 或 OPTICAL 底图目标检测，
+   默认 need_geo_correction=true。
+
+10. 如果信息不明确，不要编造具体数值。
+
+必须严格符合下面 JSON Schema：
+
+{json.dumps(schema, ensure_ascii=False)}
+"""
+
+        user_prompt = f"""
+【用户指令】
+{user_instruction}
+
+【XML任务上下文】
+{json.dumps(
+    xml_context,
+    ensure_ascii=False,
+    indent=2
+)}
+
+【当前任务上下文】
+{json.dumps(
+    task_context,
+    ensure_ascii=False,
+    indent=2
+)}
+
+请生成结构化任务需求。
+"""
+
+        result = await self.llm.chat_json(
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+            schema_model=RequirementSpec,
+        )
+
+        return result

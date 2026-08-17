@@ -16,6 +16,8 @@ class TaskRequest:
     task_id: str
     tiff_path: str
     requirement_xml_path: str
+    # 用户自然语言指令
+    instruction: str = ""
     payload_types: List[str] = field(default_factory=list)
     target_classes: List[str] = field(default_factory=list)
     # target_region: Dict[str, Any] = field(default_factory=dict)

@@ -1,3 +1,27 @@
+import os
+
+# =========================
+# Ollama / LLM 配置
+# =========================
+
+LLM_ENABLED = os.getenv("LLM_ENABLED", "true").lower() == "true"
+
+OLLAMA_BASE_URL = os.getenv(
+    "OLLAMA_BASE_URL",
+    "http://172.17.0.1:11434"
+)
+
+OLLAMA_MODEL = os.getenv(
+    "OLLAMA_MODEL",
+    "qwen3:14b"
+)
+
+OLLAMA_TIMEOUT = int(
+    os.getenv("OLLAMA_TIMEOUT", "300")
+)
+
+
+
 # 底图 tif 路径：算法对接文档中的 tiff_path。
 TIFF_PATH = "data/sample_packet/base_map.tif"
 
