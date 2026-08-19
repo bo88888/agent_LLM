@@ -194,7 +194,20 @@ def insert_mysql_prior_targets(
                     or det.get("source")
                     or "algorithm_detection"
                 )
+                # 新增：载荷类型
+                payload_type = det.get("payloadType")
 
+                # 新增：获取当前目标的切片路径
+                slice_path = (
+                    det.get("opticalSlicePath")
+                    or det.get("sarSlicePath")
+                    or det.get("slicePath")
+                )
+
+                # 新增：检测框宽度和长度
+                target_width = det.get("width")
+                target_length = det.get("length")
+ 
                 if not target_name or center_lon is None or center_lat is None:
                     continue
 
@@ -253,6 +266,10 @@ def insert_mysql_prior_targets(
                         center_Lat,
                         confidence,
                         source,
+                        payloadType,
+                        slicePath,
+                        width,
+                        length,
                         leftTopX,
                         leftTopY,
                         leftBotX,
@@ -276,6 +293,7 @@ def insert_mysql_prior_targets(
                         %s, %s, %s, %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
+                        %s, %s, %s, %s,
                         %s, %s,
                         %s, %s, %s, %s,
                         %s, %s, %s, %s,
@@ -288,6 +306,10 @@ def insert_mysql_prior_targets(
                         center_lat,
                         confidence,
                         str(prior_source),
+                        payload_type,
+                        slice_path,
+                        target_width,
+                        target_length,
 
                         det.get("leftTopX"),
                         det.get("leftTopY"),

@@ -171,7 +171,10 @@ def crop_and_save_targets(img, detections, img_name, save_root):
         conf = det["confidence"]
         save_name = f"{img_name}_{idx}_{cls_name}_{conf:.4f}.jpg"
         save_path = os.path.join(save_root, save_name)
-        cv2.imwrite(save_path, crop_img)
+        if cv2.imwrite(save_path, crop_img):
+             det["slicePath"] = save_path
+        else:
+            det["slicePath"] = None
     print(f"已裁剪并保存 {len(detections)} 个目标至: {save_root}")
 # =======================================================
 
@@ -307,7 +310,11 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
     img_name = os.path.splitext(os.path.basename(image_path))[0]
     os.makedirs(output_root, exist_ok=True)
     result_dir = os.path.join(output_root, get_unique_dir_name(output_root, img_name))
-    os.makedirs(result_dir, exist_ok=True)
+    if not crop_dir:
+        crop_dir = os.path.join(result_dir, "target_slices")
+    crop_dir = os.path.abspath(crop_dir)
+
+    os.makedirs(crop_dir, exist_ok=True)
     print(f"处理图像: {image_path} (尺寸: {img_width}x{img_height})")
     print(f"模型类型: {'OBB(旋转框)' if is_obb else 'HBB(水平框)'}")
     print(f"结果保存至: {result_dir}")
@@ -486,9 +493,13 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
         center_lat, center_lon = pixel_to_latlon(center_x_pix, center_y_pix, img_width, img_height, lat0, lon0, lat1, lon1)
 
         angle_deg = det['box'][4]
-
+        box_width = abs(float(det["box"][2]))
+        box_height = abs(float(det["box"][3]))
         target_data = {
             "targetName": det['class_name'],
+            "slicePath": det.get("slicePath"),
+            "width": round(min(box_width, box_height), 4),
+            "length": round(max(box_width, box_height), 4),
             "leftTopX": lt_x_per,
             "leftTopY": lt_y_per,
             "leftBotX": lb_x_per,

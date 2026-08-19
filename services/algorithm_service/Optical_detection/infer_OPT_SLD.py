@@ -796,10 +796,19 @@ def process_image(
         center_lat, center_lon = pixel_to_latlon(center_x_pix, center_y_pix, img_width, img_height, lat0, lon0, lat1, lon1)
 
         angle_deg = det["box"][4]
+        box_width = abs(float(det["box"][2]))
+        box_height = abs(float(det["box"][3]))
+
+        target_width = min(box_width, box_height)
+        target_length = max(box_width, box_height)
 
         target_data = {
             "targetName": det["class_name"],
             "slicePath": det.get("slicePath"),
+             # 检测框短边和长边，单位：像素
+            "width": round(target_width, 4),
+            "length": round(target_length, 4),
+
             "leftTopX": lt_x_per,
             "leftTopY": lt_y_per,
             "leftBotX": lb_x_per,

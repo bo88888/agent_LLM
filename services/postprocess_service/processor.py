@@ -298,7 +298,7 @@ def _remove_internal_fields(target: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in target.items():
         if key.startswith("_"):
             continue
-        if key in {"id", "created_at", "source"}:
+        if key in {"id", "created_at", "source", "target_id", "score", "slicePath"}:
             continue
         cleaned[key] = value
 
@@ -344,7 +344,6 @@ def _get_current_detection_text(cluster: List[Dict[str, Any]]) -> str:
 
 def _build_fused_target(
     cluster: List[Dict[str, Any]],
-    target_index: int,
 ) -> Dict[str, Any]:
     """
     根据一个目标簇生成最终融合目标。
@@ -359,9 +358,30 @@ def _build_fused_target(
 
     # 更新类别和置信度
     base["targetName"] = fused_target_name
-    base["target_id"] = f"QB_{target_index:03d}"
     base["confidence"] = round(belief, 6)
-    base["score"] = round(belief, 6)
+    base.pop("target_id", None)
+    base.pop("score", None)
+    # 汇总当前检测和数据库先验的切片路径
+    slice_paths = _collect_slice_paths(cluster)
+    base.pop("slicePath", None)
+    base.update(slice_paths)
+
+    sources = []
+
+    for det in cluster:
+        source = _get_source(det)
+        if source not in sources:
+            sources.append(source)
+
+    has_mysql_prior = any(
+        "mysql" in source.lower()
+        for source in sources
+    )
+    is_multi_evidence = len(cluster) > 1 and has_mysql_prior
+
+    # 1：仅检测；2：真正完成多源融合
+    base["flag"] = 2 if is_multi_evidence else 1
+    base["fusionSource"] = ",".join(sources)
 
     # 数值字段加权平均
     numeric_keys = [
@@ -382,19 +402,6 @@ def _build_fused_target(
         avg_value = _weighted_average(cluster, key)
         if avg_value is not None:
             base[key] = round(avg_value, 6)
-
-    # 汇总来源
-    sources = []
-
-    for det in cluster:
-        source = _get_source(det)
-        if source not in sources:
-            sources.append(source)
-
-    has_mysql_prior = any("mysql" in source.lower() for source in sources)
-    is_multi_evidence = len(cluster) > 1
-
-    base["fusionSource"] = ",".join(sources)
 
     if is_multi_evidence and has_mysql_prior:
         algorithm_infos = []
@@ -598,7 +605,6 @@ def run_qb_fusion(
         fused_targets.append(
             _build_fused_target(
                 cluster=cluster,
-                target_index=index,
             )
         )
 
@@ -615,6 +621,58 @@ def run_qb_fusion(
         print(f"[MySQL Prior] 本次新增 {inserted_count} 条目标先验记录")
 
     return fused_targets
+
+def _get_payload_type(det: Dict[str, Any]) -> str:
+    payload_type = str(det.get("payloadType") or "").lower()
+
+    if payload_type in {"optical", "sar"}:
+        return payload_type
+
+    source = str(
+        det.get("_prior_source")
+        or det.get("source")
+        or det.get("fusionSource")
+        or ""
+    ).lower()
+
+    if "optical" in source:
+        return "optical"
+
+    if "sar" in source:
+        return "sar"
+
+    return "unknown"
+
+
+def _collect_slice_paths(
+    cluster: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    paths = {
+        "opticalSlicePath": None,
+        "sarSlicePath": None,
+    }
+
+    for det in cluster:
+        payload_type = _get_payload_type(det)
+
+        if payload_type == "optical":
+            path = (
+                det.get("opticalSlicePath")
+                or det.get("slicePath")
+            )
+            if path:
+                paths["opticalSlicePath"] = path
+
+        elif payload_type == "sar":
+            path = (
+                det.get("sarSlicePath")
+                or det.get("slicePath")
+            )
+            if path:
+                paths["sarSlicePath"] = path
+
+    return paths
+
 
 
 def build_final_report(

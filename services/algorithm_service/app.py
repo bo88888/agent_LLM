@@ -145,6 +145,18 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             # 为检测结果补充调度系统需要的业务字段
             detections = raw_result.get("data", [])
             for det in detections:
+                raw_slice_path = det.pop("slicePath", None)
+                 # 1：单源检测数据
+                det["flag"] = 1
+            # det["payloadType"] = payload_type
+            # 使用独立字段区分两类切片
+                det["opticalSlicePath"] = (
+                    raw_slice_path if payload_type == "optical" else None
+                    )
+                det["sarSlicePath"] = (
+                    raw_slice_path if payload_type == "sar" else None
+                    )
+
 
                 det["fusionSource"] = tool_name
                 det["fusionBasis"] = f"{payload_type.upper()}视觉特征识别"    
