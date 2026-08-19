@@ -521,7 +521,9 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
             "center_Lon": center_lon,
             "center_Lat": center_lat,
             "confidence": round(det['confidence'], 6),
-            "angle_deg": angle_deg
+            "angle_deg": angle_deg, 
+            "angleReference": "目标旋转检测框长轴相对于图像水平轴的方向角"
+
         }
         output_data["data"].append(target_data)
 

@@ -409,6 +409,11 @@ def _build_fused_target(
         avg_value = _weighted_average(cluster, key)
         if avg_value is not None:
             base[key] = round(avg_value, 6)
+            
+    if base.get("angle_deg") is not None:
+        base["angleReference"] = (
+            "目标旋转检测框长轴相对于图像水平轴的方向角"
+        )
 
     if is_multi_evidence and has_mysql_prior:
         algorithm_infos = []
