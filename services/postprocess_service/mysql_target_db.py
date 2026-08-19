@@ -195,13 +195,16 @@ def insert_mysql_prior_targets(
                     or "algorithm_detection"
                 )
                 # 新增：载荷类型
-                payload_type = det.get("payloadType")
+                payload_type = ( det.get("payloadType") 
+                    or det.get("currentPayloadType")
+                    )   
 
                 # 新增：获取当前目标的切片路径
                 slice_path = (
-                    det.get("opticalSlicePath")
+                    det.get("slicePath")
+                    or det.get("currentSlicePath")
+                    or det.get("opticalSlicePath")
                     or det.get("sarSlicePath")
-                    or det.get("slicePath")
                 )
 
                 # 新增：检测框宽度和长度
@@ -241,7 +244,8 @@ def insert_mysql_prior_targets(
 
                 rows = cursor.fetchall()
 
-                duplicated = False
+                # 保存匹配到的数据库目标ID
+                duplicate_id = None
 
                 for row in rows:
                     dist = calculate_distance_km(
@@ -252,10 +256,30 @@ def insert_mysql_prior_targets(
                     )
 
                     if dist <= duplicate_radius_km:
-                        duplicated = True
+                        duplicate_id = row["id"]
                         break
 
-                if duplicated:
+                if duplicate_id is not None:
+                    # 目标已经存在时，补充原来为空的新字段
+                    cursor.execute(
+                        """
+                        UPDATE target_prior
+                        SET payloadType = COALESCE(payloadType, %s),
+                            slicePath = COALESCE(NULLIF(slicePath, ''), %s),
+                            width = COALESCE(width, %s),
+                            length = COALESCE(length, %s)
+                        WHERE id = %s
+                        """,
+                        (
+                            payload_type,
+                            slice_path,
+                            target_width,
+                            target_length,
+                            duplicate_id,
+                        ),
+                    )
+
+                    # 更新已有目标后，不再重复插入新目标
                     continue
 
                 cursor.execute(

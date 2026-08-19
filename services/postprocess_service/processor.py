@@ -361,8 +361,15 @@ def _build_fused_target(
     base["confidence"] = round(belief, 6)
     base.pop("target_id", None)
     base.pop("score", None)
+    base.pop("slicePath", None)
+    base.pop("payloadType", None)
+    base.pop("opticalSlicePath", None)
+    base.pop("sarSlicePath", None)
+    base.pop("currentSlicePath", None)
+    base.pop("priorSlicePath", None)
+
     # 汇总当前检测和数据库先验的切片路径
-    slice_paths = _collect_slice_paths(cluster)
+    slice_paths = _collect_fusion_paths(cluster)
     base.pop("slicePath", None)
     base.update(slice_paths)
 
@@ -643,36 +650,47 @@ def _get_payload_type(det: Dict[str, Any]) -> str:
 
     return "unknown"
 
-
-def _collect_slice_paths(
+def _collect_fusion_paths(
     cluster: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    paths = {
-        "opticalSlicePath": None,
-        "sarSlicePath": None,
-    }
+    result: Dict[str, Any] = {}
 
     for det in cluster:
         payload_type = _get_payload_type(det)
 
-        if payload_type == "optical":
-            path = (
-                det.get("opticalSlicePath")
-                or det.get("slicePath")
+        if _is_mysql_source(det):
+            # 数据库中的融合前先验目标
+            result["priorPayloadType"] = payload_type
+            result["priorSource"] = str(
+                det.get("_prior_source")
+                or det.get("source")
+                or "unknown"
             )
-            if path:
-                paths["opticalSlicePath"] = path
 
-        elif payload_type == "sar":
-            path = (
-                det.get("sarSlicePath")
-                or det.get("slicePath")
+            prior_path = (
+                det.get("slicePath")
+                or det.get("priorSlicePath")
             )
-            if path:
-                paths["sarSlicePath"] = path
 
-    return paths
+            if prior_path:
+                result["priorSlicePath"] = prior_path
 
+        else:
+            # 本次任务当前输入的检测目标
+            result["currentPayloadType"] = payload_type
+            result["currentSource"] = _get_source(det)
+
+            current_path = (
+                det.get("slicePath")
+                or det.get("currentSlicePath")
+                or det.get("opticalSlicePath")
+                or det.get("sarSlicePath")
+            )
+
+            if current_path:
+                result["currentSlicePath"] = current_path
+
+    return result
 
 
 def build_final_report(
