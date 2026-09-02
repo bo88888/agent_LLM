@@ -210,11 +210,66 @@ def crop_and_save_targets(img, detections, img_name, save_root):
     print(f"已裁剪并保存 {len(detections)} 个目标至: {save_root}")
 
 
-# ===================== ResNet 二次分类工具函数 =====================
+# ===================== 保存JPG和GeoTIFF目标切片 =====================
+def save_crop_files(
+    crop_img,
+    crop_box,
+    source_tiff_path,
+    jpg_path,
+):
+    """
+    保存JPG预览切片和保留地理坐标的GeoTIFF切片。
+    """
+    jpg_path = os.path.abspath(jpg_path)
+    tiff_path = os.path.splitext(jpg_path)[0] + ".tif"
+
+    # 保存JPG预览图
+    if not cv2.imwrite(jpg_path, crop_img):
+        raise RuntimeError(
+            f"JPG切片保存失败：{jpg_path}"
+        )
+
+    x1, y1, x2, y2 = crop_box
+    crop_width = x2 - x1
+    crop_height = y2 - y1
+
+    if crop_width <= 0 or crop_height <= 0:
+        raise ValueError(
+            f"无效裁剪范围：{crop_box}"
+        )
+
+    # 从原始GeoTIFF中直接裁剪，保留投影和地理变换
+    output_dataset = gdal.Translate(
+        tiff_path,
+        source_tiff_path,
+        format="GTiff",
+        srcWin=[
+            x1,
+            y1,
+            crop_width,
+            crop_height,
+        ],
+        creationOptions=[
+            "TILED=YES",
+            "COMPRESS=LZW",
+        ],
+    )
+
+    if output_dataset is None:
+        raise RuntimeError(
+            f"GeoTIFF切片保存失败：{tiff_path}"
+        )
+
+    output_dataset.FlushCache()
+    output_dataset = None
+
+    return jpg_path, tiff_path
+
+
 def crop_target_patch(img, det):
     """
-    根据检测框裁剪单个目标 patch。
-    与 crop_and_save_targets 的裁剪逻辑一致，但这里会返回裁剪图供 ResNet 分类。
+    根据检测框裁剪单个目标。
+    返回裁剪图和像素范围。
     """
     corners = det["corners"]
 
@@ -228,28 +283,109 @@ def crop_target_patch(img, det):
 
     h, w = img.shape[:2]
 
-    x1, y1 = max(0, x1), max(0, y1)
-    x2, y2 = min(w, x2), min(h, y2)
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(w, x2)
+    y2 = min(h, y2)
 
     crop_img = img[y1:y2, x1:x2]
 
     return crop_img, (x1, y1, x2, y2)
 
 
-def save_crop_patch(crop_img, img_name, idx, cls_name, conf, save_root):
+def crop_and_save_targets(
+    img,
+    detections,
+    img_name,
+    save_root,
+    source_tiff_path,
+):
     """
-    保存经过 ResNet 二次分类后的目标裁剪图。
+    未启用ResNet二次分类时，
+    保存YOLO检测目标的JPG和GeoTIFF切片。
     """
-    if not save_root:
+    if not save_root or not detections:
         return
 
     os.makedirs(save_root, exist_ok=True)
 
-    save_name = f"{img_name}_{idx}_{cls_name}_{conf:.4f}.jpg"
-    save_path = os.path.join(save_root, save_name)
+    for idx, det in enumerate(detections):
+        crop_img, crop_box = crop_target_patch(
+            img,
+            det,
+        )
 
-    cv2.imwrite(save_path, crop_img)
-    return save_path
+        if crop_img is None or crop_img.size == 0:
+            det["slicePath"] = None
+            det["sliceTiffPath"] = None
+            continue
+
+        cls_name = det["class_name"]
+        conf = det["confidence"]
+
+        save_name = (
+            f"{img_name}_{idx}_"
+            f"{cls_name}_{conf:.4f}.jpg"
+        )
+
+        jpg_path = os.path.join(
+            save_root,
+            save_name,
+        )
+
+        jpg_path, tiff_path = save_crop_files(
+            crop_img=crop_img,
+            crop_box=crop_box,
+            source_tiff_path=source_tiff_path,
+            jpg_path=jpg_path,
+        )
+
+        det["slicePath"] = jpg_path
+        det["sliceTiffPath"] = tiff_path
+
+    print(
+        f"已保存 {len(detections)} 个目标的"
+        f"JPG和GeoTIFF切片至：{save_root}"
+    )
+
+
+def save_crop_patch(
+    crop_img,
+    crop_box,
+    source_tiff_path,
+    img_name,
+    idx,
+    cls_name,
+    conf,
+    save_root,
+):
+    """
+    保存经过ResNet二次分类后的
+    JPG和GeoTIFF目标切片。
+    """
+    if not save_root:
+        return None, None
+
+    os.makedirs(save_root, exist_ok=True)
+
+    save_name = (
+        f"{img_name}_{idx}_"
+        f"{cls_name}_{conf:.4f}.jpg"
+    )
+
+    jpg_path = os.path.join(
+        save_root,
+        save_name,
+    )
+
+    return save_crop_files(
+        crop_img=crop_img,
+        crop_box=crop_box,
+        source_tiff_path=source_tiff_path,
+        jpg_path=jpg_path,
+    )
+
+
 
 def load_slice_classifier(payload_type, object_type):
     """
@@ -327,51 +463,72 @@ def resnet_infer_patch(crop_bgr_img, slice_classifier):
     return cls_name, round(score, 6)
 
 
-def reclassify_detections_by_slice_model(image, detections, img_name, slice_classifier, crop_dir=""):
+def reclassify_detections_by_slice_model(
+    image,
+    source_tiff_path,
+    detections,
+    img_name,
+    slice_classifier,
+    crop_dir="",
+):
     """
-    将 YOLO 检测结果逐个裁剪，并用切片 ResNet 分类结果覆盖 YOLO 类别。
-    检测框位置仍来自 YOLO，targetName / confidence 来自 ResNet。
+    将YOLO检测目标交给ResNet二次分类，
+    并保存JPG和GeoTIFF目标切片。
     """
     if not detections:
         return []
 
-    print(f"YOLO初步检测到 {len(detections)} 个目标，开始切片 ResNet 二次分类...")
+    print(
+        f"YOLO初步检测到 {len(detections)} 个目标，"
+        f"开始切片ResNet二次分类..."
+    )
 
     reclassified_dets = []
 
     for idx, det in enumerate(detections):
-        crop_patch, _ = crop_target_patch(image, det)
+        crop_patch, crop_box = crop_target_patch(
+            image,
+            det,
+        )
 
         if crop_patch is None or crop_patch.size == 0:
             new_det = det.copy()
+            new_det["slicePath"] = None
+            new_det["sliceTiffPath"] = None
             reclassified_dets.append(new_det)
             continue
 
         res_cls, res_conf = resnet_infer_patch(
             crop_bgr_img=crop_patch,
-            slice_classifier=slice_classifier
+            slice_classifier=slice_classifier,
         )
 
         new_det = det.copy()
-
-        # 关键：用 ResNet 分类结果覆盖 YOLO 原始类别
         new_det["class_name"] = res_cls
         new_det["confidence"] = res_conf
 
-        slice_path = save_crop_patch(
+        jpg_path, tiff_path = save_crop_patch(
             crop_img=crop_patch,
+            crop_box=crop_box,
+            source_tiff_path=source_tiff_path,
             img_name=img_name,
             idx=idx,
             cls_name=res_cls,
             conf=res_conf,
-            save_root=crop_dir
+            save_root=crop_dir,
         )
-        new_det["slicePath"] = slice_path
+
+        new_det["slicePath"] = jpg_path
+        new_det["sliceTiffPath"] = tiff_path
+
         reclassified_dets.append(new_det)
 
-    print(f"切片 ResNet 二次分类完成，最终有效目标 {len(reclassified_dets)} 个")
-    return reclassified_dets
+    print(
+        f"切片ResNet二次分类完成，"
+        f"最终有效目标 {len(reclassified_dets)} 个"
+    )
 
+    return reclassified_dets
 
 # =======================================================
 
@@ -752,15 +909,17 @@ def process_image(
         # ========== YOLO检测框 -> 自动裁剪 -> 切片ResNet二次分类 ==========
         merged = reclassify_detections_by_slice_model(
             image=image,
+            source_tiff_path=image_path,
             detections=merged,
             img_name=img_name,
             slice_classifier=slice_classifier,
-            crop_dir=crop_dir
+            crop_dir=crop_dir,
         )
+
     else:
         print(f"最终检测到 {len(merged)} 个有效目标")
         # 未启用二次分类时，只保存 YOLO 裁剪结果
-        crop_and_save_targets(image, merged, img_name, crop_dir)
+        crop_and_save_targets(image, merged, img_name, crop_dir, image_path)
 
     # 保存结果图
     result_image = draw_boxes(image, merged, is_obb=is_obb)
@@ -805,6 +964,7 @@ def process_image(
         target_data = {
             "targetName": det["class_name"],
             "slicePath": det.get("slicePath"),
+            "sliceTiffPath": det.get("sliceTiffPath"),
              # 检测框短边和长边，单位：像素
             "width": round(target_width, 4),
             "length": round(target_length, 4),
@@ -961,9 +1121,9 @@ def run_optical_detection(
     payload_type="optical",
     conf=0.2,
     nms_iou=0.3,
-    tile_size=2048,
+    tile_size=1024, #2048,
     overlap=400,
-    large_threshold=4096,
+    large_threshold=1500, #4096,
     crop_save_dir="",
     use_slice_classification=True
 ):

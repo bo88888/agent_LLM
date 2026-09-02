@@ -40,3 +40,6 @@ best.pt
 *.pptx
 *.aux.xml
 data/sample_packet/detect_results/**/*.json
+# 压缩备份和损坏的临时图像
+*.zip
+*.corrupt

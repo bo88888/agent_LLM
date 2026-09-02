@@ -260,14 +260,14 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
           
             if payload_type == "sar":
                 GEOMETRIC_BASE_MAP_MAP = {
-                    "ship": "/app/data/sample_packet/2023-08-10-13-17-17_UMBRA-05_GEC_wgs84_ref.tif",
-                    "plane": "/app/data/sample_packet/jiayi_SAR_ref.tif",     
+                    "ship": "/app/data/sample_packet/taiwansuao_harbor_ref.tif",
+                    "plane": "/app/data/sample_packet/OPT_ref.tif",     
                     "vehicle": "/app/data/sample_packet/20220109-sarcar_wgs84_ref.tif"   
                 }
             elif payload_type == "optical":
                 GEOMETRIC_BASE_MAP_MAP = {
-                    "ship": "/app/data/sample_packet/Suaogang_optical_enhanced_reference_1band.tif",
-                    "plane": "/app/data/sample_packet/jiayi_ref.tif",
+                    "ship": "/app/data/sample_packet/taiwansuao_harbor_ref.tif",
+                    "plane": "/app/data/sample_packet/OPT_ref.tif",
                     "vehicle": "/app/data/sample_packet/vehicle_ref.tif"
                 }
 
@@ -333,7 +333,8 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 }
             }
     except Exception as e:
-        print("[ERROR] 预处理执行异常", exc_info=True)
+        print("[ERROR] 预处理执行异常")
+        traceback.print_exc()
         return {"code": 500, "msg": f"Algorithm execution failed: {str(e)}", "data": {}}
 
 # ==========================================

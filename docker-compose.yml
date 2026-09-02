@@ -14,7 +14,12 @@ services:
       PYTHONUNBUFFERED: "1"
       NVIDIA_VISIBLE_DEVICES: "all" # GPU
       NVIDIA_DRIVER_CAPABILITIES: "all" # GPU
-      
+
+      # 对外文件访问地址
+      PUBLIC_BASE_URL: "http://192.168.30.36:8889/home/air/code_LLM/agent_LLM/data/sample_packet"
+      # 代理根目录在容器内对应的目录
+      INTERNAL_DATA_PREFIX: "/app/data/sample_packet"
+
       MYSQL_HOST: "172.17.0.1"
       MYSQL_PORT: "3306"
       MYSQL_USER: "air"
@@ -33,6 +38,7 @@ services:
       - .:/workspace                      # 映射根目录，调度器代码热更新
       - ./services/algorithm_service:/app # 映射算法目录，算法代码热更新
       - ./data:/app/data                  # 映射数据目录
+      - ./logs:/workspace/logs
       - "/home/air:/home/air"
     deploy:                             #  GPU 
       resources:
@@ -41,11 +47,26 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+              
     command:
-      - /bin/sh
+      - /bin/bash
       - -c
       - |
         set -eu
+
+         # 创建运行日志文件
+        # ==========================================
+        mkdir -p /workspace/logs
+
+        log_file="/workspace/logs/agent_llm_runtime.log"
+        touch "$$log_file"
+
+        exec > >(tee -a "$$log_file") 2>&1
+        echo "=================================================="
+        echo "agent_LLM 服务启动"
+        echo "启动时间: $$(date '+%Y-%m-%d %H:%M:%S')"
+        echo "日志文件: $$log_file"
+        echo "=================================================="
 
         # 1. 环境变量与依赖配置
         export LD_LIBRARY_PATH="/mnt/ww/opencv460/lib64:/usr/local/lib:$${LD_LIBRARY_PATH:-}"

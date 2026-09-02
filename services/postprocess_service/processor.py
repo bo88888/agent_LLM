@@ -298,7 +298,7 @@ def _remove_internal_fields(target: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in target.items():
         if key.startswith("_"):
             continue
-        if key in {"id", "created_at", "source", "target_id", "score", "slicePath"}:
+        if key in {"id", "created_at", "source", "target_id", "score", "slicePath", "sliceTiffPath",}:
             continue
         cleaned[key] = value
 
@@ -367,6 +367,9 @@ def _build_fused_target(
     base.pop("sarSlicePath", None)
     base.pop("currentSlicePath", None)
     base.pop("priorSlicePath", None)
+    base.pop("sliceTiffPath", None)
+    base.pop("currentSliceTiffPath", None)
+    base.pop("priorSliceTiffPath", None)
 
     # 汇总当前检测和数据库先验的切片路径
     slice_paths = _collect_fusion_paths(cluster)
@@ -658,13 +661,16 @@ def _get_payload_type(det: Dict[str, Any]) -> str:
 def _collect_fusion_paths(
     cluster: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    """
+    汇总当前检测结果和数据库先验结果的
+    JPG及GeoTIFF切片路径。
+    """
     result: Dict[str, Any] = {}
 
     for det in cluster:
         payload_type = _get_payload_type(det)
 
         if _is_mysql_source(det):
-            # 数据库中的融合前先验目标
             result["priorPayloadType"] = payload_type
             result["priorSource"] = str(
                 det.get("_prior_source")
@@ -680,8 +686,17 @@ def _collect_fusion_paths(
             if prior_path:
                 result["priorSlicePath"] = prior_path
 
+            prior_tiff_path = (
+                det.get("sliceTiffPath")
+                or det.get("priorSliceTiffPath")
+            )
+
+            if prior_tiff_path:
+                result["priorSliceTiffPath"] = (
+                    prior_tiff_path
+                )
+
         else:
-            # 本次任务当前输入的检测目标
             result["currentPayloadType"] = payload_type
             result["currentSource"] = _get_source(det)
 
@@ -693,10 +708,21 @@ def _collect_fusion_paths(
             )
 
             if current_path:
-                result["currentSlicePath"] = current_path
+                result["currentSlicePath"] = (
+                    current_path
+                )
+
+            current_tiff_path = (
+                det.get("sliceTiffPath")
+                or det.get("currentSliceTiffPath")
+            )
+
+            if current_tiff_path:
+                result["currentSliceTiffPath"] = (
+                    current_tiff_path
+                )
 
     return result
-
 
 def build_final_report(
     fused_targets: List[dict],

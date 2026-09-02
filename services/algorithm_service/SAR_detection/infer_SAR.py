@@ -139,43 +139,138 @@ def horizontal_nms(detections, iou_threshold=0.5):
             keep.append(i)
     return [sorted_dets[i] for i in keep]
 
-# ===================== 新增裁剪函数 =====================
-def crop_and_save_targets(img, detections, img_name, save_root):
+# ===================== 保存JPG和GeoTIFF目标切片 =====================
+def save_crop_files(
+    crop_img,
+    crop_box,
+    source_tiff_path,
+    jpg_path,
+):
     """
-    根据检测框裁剪目标并保存
-    :param img: 原始图像
-    :param detections: 检测结果列表
-    :param img_name: 图像名
-    :param save_root: 裁剪保存根目录，为空则不保存
+    保存JPG预览切片和保留地理坐标的GeoTIFF切片。
+    """
+    jpg_path = os.path.abspath(jpg_path)
+    tiff_path = os.path.splitext(jpg_path)[0] + ".tif"
+
+    if not cv2.imwrite(jpg_path, crop_img):
+        raise RuntimeError(
+            f"JPG切片保存失败：{jpg_path}"
+        )
+
+    x1, y1, x2, y2 = crop_box
+    crop_width = x2 - x1
+    crop_height = y2 - y1
+
+    if crop_width <= 0 or crop_height <= 0:
+        raise ValueError(
+            f"无效裁剪范围：{crop_box}"
+        )
+
+    output_dataset = gdal.Translate(
+        tiff_path,
+        source_tiff_path,
+        format="GTiff",
+        srcWin=[
+            x1,
+            y1,
+            crop_width,
+            crop_height,
+        ],
+        creationOptions=[
+            "TILED=YES",
+            "COMPRESS=LZW",
+        ],
+    )
+
+    if output_dataset is None:
+        raise RuntimeError(
+            f"GeoTIFF切片保存失败：{tiff_path}"
+        )
+
+    output_dataset.FlushCache()
+    output_dataset = None
+
+    return jpg_path, tiff_path
+
+
+def crop_and_save_targets(
+    img,
+    detections,
+    img_name,
+    save_root,
+    source_tiff_path,
+):
+    """
+    根据检测框保存JPG和GeoTIFF目标切片。
     """
     if not save_root or not detections:
         return
+
     os.makedirs(save_root, exist_ok=True)
+
+    h, w = img.shape[:2]
+
     for idx, det in enumerate(detections):
         corners = det["corners"]
-        # 取外接矩形做裁剪（兼容旋转框/水平框）
-        x_coords = corners[:, 0]
-        y_coords = corners[:, 1]
-        x1 = int(np.floor(np.min(x_coords)))
-        y1 = int(np.floor(np.min(y_coords)))
-        x2 = int(np.ceil(np.max(x_coords)))
-        y2 = int(np.ceil(np.max(y_coords)))
-        # 边界限制
-        h, w = img.shape[:2]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w, x2), min(h, y2)
-        # 裁剪
+
+        x1 = max(
+            0,
+            int(np.floor(np.min(corners[:, 0]))),
+        )
+        y1 = max(
+            0,
+            int(np.floor(np.min(corners[:, 1]))),
+        )
+        x2 = min(
+            w,
+            int(np.ceil(np.max(corners[:, 0]))),
+        )
+        y2 = min(
+            h,
+            int(np.ceil(np.max(corners[:, 1]))),
+        )
+
+        if x2 <= x1 or y2 <= y1:
+            det["slicePath"] = None
+            det["sliceTiffPath"] = None
+            continue
+
         crop_img = img[y1:y2, x1:x2]
-        # 保存命名: 原图名_序号_类别_置信度.jpg
+
+        if crop_img.size == 0:
+            det["slicePath"] = None
+            det["sliceTiffPath"] = None
+            continue
+
         cls_name = det["class_name"]
         conf = det["confidence"]
-        save_name = f"{img_name}_{idx}_{cls_name}_{conf:.4f}.jpg"
-        save_path = os.path.join(save_root, save_name)
-        if cv2.imwrite(save_path, crop_img):
-             det["slicePath"] = save_path
-        else:
-            det["slicePath"] = None
-    print(f"已裁剪并保存 {len(detections)} 个目标至: {save_root}")
+
+        save_name = (
+            f"{img_name}_{idx}_"
+            f"{cls_name}_{conf:.4f}.jpg"
+        )
+
+        jpg_path = os.path.join(
+            save_root,
+            save_name,
+        )
+
+        jpg_path, tiff_path = save_crop_files(
+            crop_img=crop_img,
+            crop_box=(x1, y1, x2, y2),
+            source_tiff_path=source_tiff_path,
+            jpg_path=jpg_path,
+        )
+
+        det["slicePath"] = jpg_path
+        det["sliceTiffPath"] = tiff_path
+
+    print(
+        f"已保存 {len(detections)} 个目标的"
+        f"JPG和GeoTIFF切片至：{save_root}"
+    )
+
+
 # =======================================================
 
 def get_parse():
@@ -460,7 +555,7 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
 
     print(f"最终检测到 {len(merged)} 个有效目标")
     # ========== 调用新增裁剪函数 ==========
-    crop_and_save_targets(image, merged, img_name, crop_dir)
+    crop_and_save_targets(image, merged, img_name, crop_dir, image_path,)
 
     # 保存结果图
     result_image = draw_boxes(image, merged, is_obb=is_obb)
@@ -498,6 +593,7 @@ def process_image(model, image_path, conf_threshold, nms_iou, tile_size, overlap
         target_data = {
             "targetName": det['class_name'],
             "slicePath": det.get("slicePath"),
+            "sliceTiffPath": det.get("sliceTiffPath"),
             "width": round(min(box_width, box_height), 4),
             "length": round(max(box_width, box_height), 4),
             "leftTopX": lt_x_per,
@@ -599,7 +695,7 @@ def main():
     print(f"所有结果汇总保存: {summary_json_path}")
     print(f"处理完成！结果目录: {args.output_root}")
 def run_sar_detection(image_path, model_path, output_root, object_type, payload_type='optical', 
-                      conf=0.2, nms_iou=0.3, tile_size=2048, overlap=400, large_threshold=4096, 
+                      conf=0.2, nms_iou=0.3, tile_size=512, overlap=400, large_threshold=1500, 
                       crop_save_dir=''):
     model = YOLO(model_path)
 
