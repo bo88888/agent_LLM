@@ -10,6 +10,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
+      PROJ_LIB: "/usr/local/share/proj"
+      PROJ_DATA: "/usr/local/share/proj"
+
       OMP_NUM_THREADS: "8"
       PYTHONUNBUFFERED: "1"
       NVIDIA_VISIBLE_DEVICES: "all" # GPU
