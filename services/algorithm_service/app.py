@@ -3,6 +3,10 @@ import random
 import traceback
 import subprocess
 from typing import Dict, Any
+import cv2
+import numpy as np
+import rasterio
+from rasterio.enums import Resampling
 from fastapi import FastAPI
 from SAR_pro import process_sar_image
 from opt_pro import process_optical_rs_image
@@ -20,43 +24,85 @@ def get_region(payload: Dict[str, Any]) -> Dict[str, Any]:
 # ==========================================
 # 1. 视觉目标检测逻辑
 # ==========================================
+def _geo_item_matches_payload(item: dict, payload_type: str) -> bool:
+    item_payload = str(item.get("payload_type", "")).lower()
+    if item_payload:
+        return item_payload == payload_type
+    original_input = str(item.get("original_input", "")).lower()
+    return payload_type in original_input or not original_input
+
+
+def select_detection_input(tool_name: str, params: dict, input_data: dict):
+    """Select geo/preprocessed/raw input according to the adaptive plan.
+
+    Every branch ends with the raw TIFF, so skipped or failed optional stages do
+    not block detection.
+    """
+    payload_type = "sar" if tool_name.startswith("sar_") else "optical"
+    preference = str(params.get("input_preference", "geo")).lower()
+    previous_results = input_data.get("previous_results", {})
+    candidates = {"geo": [], "preprocessed": [], "raw": []}
+
+    for result in previous_results.values():
+        for item in result.get("all_corrected_results", []) or []:
+            if (
+                item.get("quality_accepted", True)
+                and _geo_item_matches_payload(item, payload_type)
+                and item.get("geo_corrected_path")
+            ):
+                candidates["geo"].append(item["geo_corrected_path"])
+
+        if result.get("quality_accepted", True) and result.get("geo_corrected_path"):
+            candidates["geo"].append(result["geo_corrected_path"])
+
+        preprocess_key = (
+            "sar_denoised_path" if payload_type == "sar"
+            else "optical_enhanced_path"
+        )
+        if result.get(preprocess_key):
+            candidates["preprocessed"].append(result[preprocess_key])
+
+    raw_path = input_data.get("tiff_path", "")
+    if raw_path:
+        candidates["raw"].append(raw_path)
+
+    order_map = {
+        "raw": ["raw", "preprocessed", "geo"],
+        "preprocessed": ["preprocessed", "raw", "geo"],
+        "geo": ["geo", "preprocessed", "raw"],
+    }
+    for source in order_map.get(preference, order_map["geo"]):
+        for path in candidates[source]:
+            resolved = path if str(path).startswith("/") else os.path.join("/app", path)
+            if os.path.exists(resolved):
+                return resolved, source
+    return "", "none"
+
+
+def image_sharpness(path: str) -> float:
+    """Return a lightweight Laplacian sharpness score for geo quality gating."""
+    with rasterio.open(path) as src:
+        scale = max(src.width / 1024, src.height / 1024, 1.0)
+        image = src.read(
+            1,
+            out_shape=(max(1, int(src.height / scale)), max(1, int(src.width / scale))),
+            resampling=Resampling.nearest,
+        ).astype(np.float32)
+    values = image[np.isfinite(image)]
+    if values.size < 32:
+        return 0.0
+    p2, p98 = np.percentile(values, [2, 98])
+    if p98 <= p2:
+        return 0.0
+    normalized = np.clip((image - p2) / (p98 - p2) * 255.0, 0, 255).astype(np.uint8)
+    return float(cv2.Laplacian(normalized, cv2.CV_32F).var())
+
+
 def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dict, input_data: dict) -> dict:
     mode = params.get("mode", "base_map")
-
-    tiff_path = ""
-    previous_results = input_data.get("previous_results", {})
-    
-    for res_content in previous_results.values():
-        all_corrected = res_content.get("all_corrected_results", [])
-        
-        if all_corrected:
-            # 遍历 P3 输出的所有校正图片，精准匹配载荷类型
-            for item in all_corrected:
-                orig_input = item.get("original_input", "")
-                geo_path = item.get("geo_corrected_path", "")
-                
-                # 如果当前是光学检测工具，拿光学增强后的图校正来的结果
-                if tool_name.startswith("optical_") and "optical" in orig_input:
-                    tiff_path = geo_path
-                    break
-                # 如果当前是 SAR 检测工具，拿 SAR 去噪后的图校正来的结果
-                elif tool_name.startswith("sar_") and "sar" in orig_input:
-                    tiff_path = geo_path
-                    break
-        if tiff_path:
-            break
-            
-    # 如果没找到，退化尝试拿单一的 geo_corrected_path (兼容只传一张图的情况或旧版输出)
+    tiff_path, input_source = select_detection_input(tool_name, params, input_data)
     if not tiff_path:
-        for res_content in previous_results.values():
-            path = res_content.get("geo_corrected_path") 
-            if path:
-                tiff_path = path
-                break
-
-    # 致命拦截：如果还是没找到，直接阻断
-    if not tiff_path:
-        error_msg = f"目标检测阻断：未找到匹配当前载荷({tool_name})的几何精校正输出。输入上下文: {previous_results}"
+        error_msg = f"目标检测阻断：未找到当前载荷({tool_name})可用的原始、预处理或校正影像"
         print(f"[错误] {error_msg}")
         return {
             "code": 500,
@@ -64,8 +110,7 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             "data": {}
         }
 
-    if tiff_path and not tiff_path.startswith("/"):
-        tiff_path = os.path.join("/app", tiff_path)
+    print(f"[智能选路] {tool_name} 使用 {input_source} 影像: {tiff_path}")
     
     # ----------------------------------------------------
     # 2. 真实视觉目标检测接入 (动态适配 SAR/光学 + ship/plane/vehicle)
@@ -166,7 +211,11 @@ def call_specific_algorithm_docker(tool_name: str, target_name: str, params: dic
             return {
                 "code": 200,
                 "msg": f"success (real detection on {os.path.basename(tiff_path)})",
-                "data": {"detections": detections}
+                "data": {
+                    "detections": detections,
+                    "detection_input_path": tiff_path,
+                    "detection_input_source": input_source,
+                }
             }
             
         except Exception as e:
@@ -257,7 +306,8 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                     elif res_content.get("optical_enhanced_path"):
                         payload_type = "optical"
                         break
-          
+
+            GEOMETRIC_BASE_MAP_MAP = {}
             if payload_type == "sar":
                 GEOMETRIC_BASE_MAP_MAP = {
                     "ship": "/app/data/sample_packet/taiwansuao_harbor_ref.tif",
@@ -273,6 +323,13 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
 
             base_map_path = GEOMETRIC_BASE_MAP_MAP.get(target_class)
 
+            if not base_map_path or not os.path.exists(base_map_path):
+                return {
+                    "code": 500,
+                    "msg": f"未找到{payload_type}/{target_class}对应的几何校正参考图",
+                    "data": {},
+                }
+
 
             images_to_correct = []
 
@@ -283,7 +340,11 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                     path = res_content.get("optical_enhanced_path")
                     
                 if path: images_to_correct.append(path)
-            
+
+            # 预处理被智能体跳过或失败时，允许直接校正原始 TIFF。
+            if not images_to_correct and tiff_path:
+                images_to_correct.append(tiff_path)
+
             if not images_to_correct:
                 return {"code": 500, "msg": "未找到待校正图片", "data": {}}
 
@@ -318,9 +379,30 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 else:
                     return {"code": 500, "msg": "C++运行成功但未找到默认输出文件", "data": {}}
 
+                source_sharpness = image_sharpness(source_image_path)
+                corrected_sharpness = image_sharpness(final_geo_path)
+                sharpness_ratio = (
+                    corrected_sharpness / source_sharpness
+                    if source_sharpness > 0 else 1.0
+                )
+                min_ratio = float(os.getenv("GEO_MIN_SHARPNESS_RATIO", "0.55"))
+                quality_accepted = sharpness_ratio >= min_ratio
+
+                if not quality_accepted:
+                    print(
+                        "[几何质量门控] 校正结果清晰度下降明显，"
+                        f"ratio={sharpness_ratio:.4f} < {min_ratio:.2f}，"
+                        "检测阶段将回退到上游影像"
+                    )
+
                 corrected_results.append({
                     "original_input": source_image_path,
-                    "geo_corrected_path": final_geo_path
+                    "geo_corrected_path": final_geo_path,
+                    "payload_type": payload_type,
+                    "source_sharpness": round(source_sharpness, 4),
+                    "corrected_sharpness": round(corrected_sharpness, 4),
+                    "sharpness_ratio": round(sharpness_ratio, 4),
+                    "quality_accepted": quality_accepted,
                 })
             
             return {
@@ -329,7 +411,13 @@ def run_local_preprocess_model(tool_name: str, tiff_path: str, params: dict, inp
                 "data": {
                     "geo_corrected_path": corrected_results[-1]["geo_corrected_path"],
                     "all_corrected_results": corrected_results,
-                    "target_resolution": params.get("target_resolution", "2m")
+                    "target_resolution": params.get("target_resolution", "2m"),
+                    "quality_accepted": corrected_results[-1]["quality_accepted"],
+                    "quality_reason": (
+                        "几何校正结果通过清晰度门控"
+                        if corrected_results[-1]["quality_accepted"]
+                        else "几何校正导致清晰度明显下降，检测回退到上游影像"
+                    ),
                 }
             }
     except Exception as e:
