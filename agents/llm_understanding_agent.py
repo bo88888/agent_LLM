@@ -67,8 +67,10 @@ class LLMUnderstandingAgent:
    geometry
    detect
 
-9. 如果是 SAR 或 OPTICAL 底图目标检测，
-   默认 need_geo_correction=true。
+9. execution_policy 中 preprocess 和 geo_correction 只能为：
+   auto、force、skip。
+   用户明确说“不做/跳过”时返回 skip；明确说“必须执行”时返回 force；
+   未明确说明时返回 auto，不要擅自固定为 force。
 
 10. 如果信息不明确，不要编造具体数值。
 
