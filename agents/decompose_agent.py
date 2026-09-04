@@ -122,25 +122,49 @@ class DecomposeAgent:
         geo_deps: List[str] = []
         valid_payloads: List[str] = []
 
+        stage_decision = req.get("stage_decisions", {}).get("preprocess", {})
+        run_preprocess = stage_decision.get("decision", "execute") == "execute"
+
+        # 即使跳过预处理，原始影像仍是有效检测输入。
+        valid_payloads = [
+            payload for payload in payload_types
+            if payload in {"SAR", "OPTICAL", "ELINT"}
+        ]
+
         for capability in self._matching_capabilities("preprocess", mode):
             payload = capability.payload_types[0] if capability.payload_types else ""
             if payload not in payload_types:
                 continue
 
+            if not run_preprocess:
+                self._append_skip(
+                    context,
+                    capability,
+                    stage_decision.get("reason", "preprocessing skipped by adaptive policy"),
+                    payload_type=payload,
+                )
+                continue
+
             subtask_id = PREPROCESS_TASK_IDS.get(
                 capability.tool_name, f"P{len(tasks) + 1}"
             )
-            params = {"mode": mode, "tiff_path": input_path}
+            params = {
+                "mode": mode,
+                "tiff_path": input_path,
+                "operations": stage_decision.get("operations", []),
+            }
             tasks.append(
                 self._build_task(
                     subtask_id,
                     capability,
                     parameters=params,
-                    reason=f"{payload} input is available, so preprocessing is selected",
+                    reason=stage_decision.get(
+                        "reason",
+                        f"{payload} preprocessing selected",
+                    ),
                 )
             )
             geo_deps.append(subtask_id)
-            valid_payloads.append(payload)
 
         return tasks, geo_deps, valid_payloads
 
@@ -150,10 +174,21 @@ class DecomposeAgent:
         mode: str,
         geo_deps: List[str],
     ) -> List[SubTask]:
-        need_geo = context.parsed_requirement.get("constraints", {}).get(
-            "need_geo_correction", True
-        )
-        if not geo_deps or not need_geo:
+        stage_decision = context.parsed_requirement.get(
+            "stage_decisions", {}
+        ).get("geometry", {})
+        need_geo = stage_decision.get("decision", "execute") == "execute"
+        payload_types = context.parsed_requirement.get("payload_types") or []
+        if not any(payload in {"SAR", "OPTICAL"} for payload in payload_types):
+            return []
+        if not need_geo:
+            capability = self._capability("geo_correction_service")
+            if capability is not None:
+                self._append_skip(
+                    context,
+                    capability,
+                    stage_decision.get("reason", "geo correction skipped by adaptive policy"),
+                )
             return []
 
         capability = self._capability("geo_correction_service")
@@ -169,14 +204,25 @@ class DecomposeAgent:
 
         primary_target = target_classes[0]
 
-        params = {"mode": mode, "target_resolution": "2m", "source_resolution": "200m", "target_class": primary_target}
+        primary_payload = payload_types[0].lower() if payload_types else ""
+        params = {
+            "mode": mode,
+            "target_resolution": "2m",
+            "source_resolution": "200m",
+            "target_class": primary_target,
+            "payload_type": primary_payload,
+            "input_preference": "preprocessed" if geo_deps else "raw",
+        }
         return [
             self._build_task(
                 "P3",
                 capability,
                 dependencies=list(geo_deps),
                 parameters=params,
-                reason="geo correction is required after available visual preprocessing outputs",
+                reason=stage_decision.get(
+                    "reason",
+                    "geo correction selected by adaptive policy",
+                ),
             )
         ]
 
@@ -215,23 +261,33 @@ class DecomposeAgent:
                 )
                 continue
 
-            dependencies = list(geo_task_ids) if capability.requires_geo else []
-            if capability.requires_geo and not dependencies:
-                self._append_skip(
-                    context,
-                    capability,
-                    "visual detection requires geo correction but no geo task was generated",
-                    payload_type=payload,
-                    target_class=target,
-                )
-                continue
+            preprocess_id = {
+                "SAR": PREPROCESS_TASK_IDS["sar_denoise_service"],
+                "OPTICAL": PREPROCESS_TASK_IDS["optical_enhance_service"],
+            }.get(payload)
+            generated_ids = {task.subtask_id for task in context.subtasks}
+            if geo_task_ids:
+                dependencies = list(geo_task_ids)
+                input_preference = "geo"
+            elif preprocess_id and preprocess_id in generated_ids:
+                dependencies = [preprocess_id]
+                input_preference = "preprocessed"
+            else:
+                dependencies = []
+                input_preference = "raw"
 
             subtask_id = DETECTION_TASK_IDS.get(
                 (payload, target), f"D{len(tasks) + 1}"
             )
-            params = {"mode": mode, "tiff_path": req.get("tiff_path", "")}
+            params = {
+                "mode": mode,
+                "tiff_path": req.get("tiff_path", ""),
+                "payload_type": payload.lower(),
+                "input_preference": input_preference,
+                "adaptive_attempt": 0,
+            }
             reason = (
-                f"{payload} {target} detection requested"
+                f"{payload} {target} detection requested; input={input_preference}"
                 if target
                 else f"{payload} auxiliary detection requested"
             )
@@ -260,6 +316,9 @@ class DecomposeAgent:
             context, mode
         )
         geo_tasks = self._build_geo_task(context, mode, geo_deps)
+        # _build_detection_tasks uses generated task IDs to connect the shortest
+        # valid chain, so expose upstream tasks before building detection nodes.
+        context.subtasks = preprocess_tasks + geo_tasks
         detection_tasks = self._build_detection_tasks(
             context,
             mode,
