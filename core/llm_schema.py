@@ -7,11 +7,20 @@ PayloadType = Literal["SAR", "OPTICAL", "ELINT"]
 TargetClass = Literal["plane", "ship", "vehicle"]
 DetectionMode = Literal["base_map", "slice"]
 Priority = Literal["low", "normal", "high", "urgent"]
+StageMode = Literal["auto", "force", "skip"]
 
 class RequirementConstraints(BaseModel):
     """任务约束。"""
 
-    need_geo_correction: bool = True
+    # 兼容旧字段；None 表示交给自动判别。
+    need_geo_correction: Optional[bool] = None
+
+
+class ExecutionPolicy(BaseModel):
+    """用户对处理链的控制；未明确指定时保持 auto。"""
+
+    preprocess: StageMode = "auto"
+    geo_correction: StageMode = "auto"
 
 
 class ResourceRequirements(BaseModel):
@@ -70,6 +79,10 @@ class RequirementSpec(BaseModel):
 
     constraints: RequirementConstraints = Field(
         default_factory=RequirementConstraints
+    )
+
+    execution_policy: ExecutionPolicy = Field(
+        default_factory=ExecutionPolicy
     )
 
     resources: ResourceRequirements = Field(
