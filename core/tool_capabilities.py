@@ -33,6 +33,8 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         payload_types=["SAR"],
         input_key="SAR",
         output_schema=["sar_denoised_path"],
+        optional=True,
+        failure_strategy="skip",
     ),
     ToolCapability(
         tool_name="optical_enhance_service",
@@ -42,6 +44,8 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         payload_types=["OPTICAL"],
         input_key="OPTICAL",
         output_schema=["optical_enhanced_path"],
+        optional=True,
+        failure_strategy="skip",
     ),
     ToolCapability(
         tool_name="geo_correction_service",
@@ -50,6 +54,8 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["SAR", "OPTICAL"],
         output_schema=["geo_corrected_path", "target_resolution"],
+        optional=True,
+        failure_strategy="skip",
     ),
     ToolCapability(
         tool_name="sar_plane_service",
@@ -58,7 +64,7 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["SAR"],
         target_classes=["plane"],
-        requires_geo=True,
+        requires_geo=False,
         output_schema=["detections"],
     ),
     ToolCapability(
@@ -68,7 +74,7 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["SAR"],
         target_classes=["ship"],
-        requires_geo=True,
+        requires_geo=False,
         output_schema=["detections"],
     ),
     ToolCapability(
@@ -78,7 +84,7 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["SAR"],
         target_classes=["vehicle"],
-        requires_geo=True,
+        requires_geo=False,
         output_schema=["detections"],
     ),
     ToolCapability(
@@ -88,7 +94,7 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["OPTICAL"],
         target_classes=["plane"],
-        requires_geo=True,
+        requires_geo=False,
         output_schema=["detections"],
     ),
     ToolCapability(
@@ -98,7 +104,7 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["OPTICAL"],
         target_classes=["ship"],
-        requires_geo=True,
+        requires_geo=False,
         output_schema=["detections"],
     ),
     ToolCapability(
@@ -108,7 +114,7 @@ DEFAULT_TOOL_CAPABILITIES: List[ToolCapability] = [
         modes=["base_map"],
         payload_types=["OPTICAL"],
         target_classes=["vehicle"],
-        requires_geo=True,
+        requires_geo=False,
         output_schema=["detections"],
     ),
     ToolCapability(
