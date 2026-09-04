@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import List
 
 from agents.replan_agent import ReplanDecisionAgent
@@ -108,6 +109,152 @@ class IntelligentScheduler:
             message=message,
         )
 
+    @staticmethod
+    def _detection_quality(output):
+        detections = output.get("detections", []) or []
+        scores = []
+        for detection in detections:
+            value = detection.get("confidence", detection.get("score"))
+            try:
+                scores.append(float(value))
+            except (TypeError, ValueError):
+                continue
+        return len(detections), sum(scores) / len(scores) if scores else 0.0
+
+    def _choose_detection_attempt(
+        self,
+        context: ExecutionContext,
+        task: SubTask,
+        result: ToolResult,
+    ) -> ToolResult:
+        """After adaptive redetection, retain the stronger runtime result."""
+        if task.stage != "detect" or task.parameters.get("adaptive_attempt", 0) < 1:
+            return result
+        initial_results = context.metadata.get("adaptive_initial_results", {})
+        original_output = initial_results.pop(task.subtask_id, None)
+        if original_output is None:
+            return result
+
+        old_count, old_confidence = self._detection_quality(original_output)
+        new_count, new_confidence = self._detection_quality(result.output)
+        choose_original = (
+            old_count > 0
+            and (
+                new_count == 0
+                or old_confidence > new_confidence
+            )
+        )
+        selected = "raw" if choose_original else result.output.get(
+            "detection_input_source", "preprocessed"
+        )
+        self._record_trace(
+            context,
+            "adaptive_result_selected",
+            subtask_id=task.subtask_id,
+            selected_input=selected,
+            raw_target_count=old_count,
+            raw_mean_confidence=round(old_confidence, 4),
+            retry_target_count=new_count,
+            retry_mean_confidence=round(new_confidence, 4),
+        )
+        self._record_replan(
+            context,
+            "adaptive_result_selection",
+            subtask_id=task.subtask_id,
+            selected_input=selected,
+            reason="保留两次检测中运行时质量较优的结果",
+        )
+        if not choose_original:
+            return result
+        return ToolResult(
+            subtask_id=result.subtask_id,
+            tool_name=result.tool_name,
+            success=True,
+            output=original_output,
+            message="adaptive comparison retained raw-image detection",
+            confidence=old_confidence,
+        )
+
+    def _schedule_detection_replan(
+        self,
+        context: ExecutionContext,
+        task: SubTask,
+        result: ToolResult,
+    ) -> bool:
+        if task.stage != "detect" or task.parameters.get("adaptive_attempt", 0) >= 1:
+            return False
+        input_source = result.output.get(
+            "detection_input_source",
+            task.parameters.get("input_preference", ""),
+        )
+        if input_source != "raw":
+            return False
+
+        target_count, mean_confidence = self._detection_quality(result.output)
+        threshold = float(os.getenv("ADAPTIVE_DETECTION_CONFIDENCE", "0.40"))
+        if target_count > 0 and mean_confidence >= threshold:
+            return False
+
+        if task.tool_name.startswith("optical_"):
+            preprocess_tool = "optical_enhance_service"
+        elif task.tool_name.startswith("sar_"):
+            preprocess_tool = "sar_denoise_service"
+        else:
+            return False
+        if not self.invoker_agent.registry.has_tool(preprocess_tool):
+            return False
+
+        replan_id = f"RP_{task.subtask_id}_P"
+        if any(item.subtask_id == replan_id for item in context.subtasks):
+            return False
+        capability = self.invoker_agent.registry.get_capability(preprocess_tool)
+        reason = (
+            f"原图检测结果较弱：target_count={target_count}，"
+            f"mean_confidence={mean_confidence:.4f}，阈值={threshold:.2f}"
+        )
+        context.subtasks.append(
+            SubTask(
+                subtask_id=replan_id,
+                name=capability.display_name,
+                tool_name=preprocess_tool,
+                dependencies=[],
+                parameters={
+                    "mode": "base_map",
+                    "tiff_path": context.request.tiff_path,
+                    "trigger": "low_detection_confidence",
+                },
+                stage=capability.stage,
+                capability_id=capability.capability_id,
+                reason=reason,
+                optional=True,
+                fallback_tools=list(capability.fallback_tools),
+            )
+        )
+        context.metadata.setdefault("adaptive_initial_results", {})[
+            task.subtask_id
+        ] = result.output
+        context.execution_plan.extend([replan_id, task.subtask_id])
+        task.dependencies = [replan_id]
+        task.parameters["input_preference"] = "preprocessed"
+        task.parameters["adaptive_attempt"] = 1
+        task.retry_count = 0
+        task.status = TaskStatus.PENDING
+        self._record_trace(
+            context,
+            "detection_quality_replan",
+            subtask_id=task.subtask_id,
+            added_subtask_id=replan_id,
+            reason=reason,
+        )
+        self._record_replan(
+            context,
+            "quality_replan",
+            subtask_id=task.subtask_id,
+            action="preprocess_then_redetect",
+            reason=reason,
+        )
+        return True
+
     def _mark_blocked_tasks(self, context: ExecutionContext, tasks: List[SubTask]):
         task_by_id = self._task_by_id(context)
 
@@ -188,6 +335,35 @@ class IntelligentScheduler:
             message,
             self.invoker_agent.registry,
         )
+
+        # 如果没有注册备用检测器，在常规重试耗尽后退回原始影像。
+        if (
+            decision.action == "fail"
+            and task.stage == "detect"
+            and task.parameters.get("input_preference") != "raw"
+            and not task.parameters.get("input_fallback_used", False)
+        ):
+            task.parameters["input_preference"] = "raw"
+            task.parameters["input_fallback_used"] = True
+            task.retry_count = 0
+            task.status = TaskStatus.PENDING
+            context.tool_results.pop(task.subtask_id, None)
+            self._record_trace(
+                context,
+                "task_input_degraded",
+                subtask_id=task.subtask_id,
+                tool_name=task.tool_name,
+                input_preference="raw",
+                reason="检测服务重试耗尽，降级为原始影像输入",
+            )
+            self._record_replan(
+                context,
+                "degrade_input",
+                subtask_id=task.subtask_id,
+                input_preference="raw",
+                reason="未配置备用检测器，使用原图降级执行",
+            )
+            return
 
         if decision.action == "retry":
             task.retry_count += 1
@@ -322,6 +498,9 @@ class IntelligentScheduler:
                     continue
 
                 if result.success:
+                    if self._schedule_detection_replan(context, task, result):
+                        continue
+                    result = self._choose_detection_attempt(context, task, result)
                     context.tool_results[task.subtask_id] = result
                     task.status = TaskStatus.SUCCESS
                     payload = {
@@ -332,6 +511,27 @@ class IntelligentScheduler:
                     if result.confidence is not None:
                         payload["confidence"] = result.confidence
                     self._record_trace(context, "task_succeeded", **payload)
+                    if (
+                        task.stage == "geometry"
+                        and result.output.get("quality_accepted") is False
+                    ):
+                        reason = result.output.get(
+                            "quality_reason",
+                            "几何校正结果没有通过清晰度门控",
+                        )
+                        self._record_trace(
+                            context,
+                            "geometry_quality_fallback",
+                            subtask_id=task.subtask_id,
+                            reason=reason,
+                        )
+                        self._record_replan(
+                            context,
+                            "geometry_fallback",
+                            subtask_id=task.subtask_id,
+                            action="use_upstream_image",
+                            reason=reason,
+                        )
                 else:
                     self._handle_failure(context, task, result.message)
 
