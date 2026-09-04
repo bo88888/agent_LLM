@@ -3,6 +3,7 @@ from agents.decompose_agent import DecomposeAgent
 from agents.input_agent import InputAgent
 from agents.planning_agent import PlanningAgent
 from agents.understanding_agent import UnderstandingAgent
+from agents.image_assessment_agent import ImageAssessmentAgent
 from core.schema import ExecutionContext
 from agents.llm_understanding_agent import LLMUnderstandingAgent
 
@@ -174,6 +175,15 @@ class OrchestratorAgent:
                 llm_data["deadline_seconds"]
             )
 
+        # 只有用户通过自然语言明确给出的 force/skip 才覆盖 XML。
+        # LLM 的默认 auto 不覆盖 XML 中已有的明确策略。
+        llm_policy = dict(llm_data.get("execution_policy") or {})
+        final_policy = dict(final_requirement.get("execution_policy") or {})
+        for stage, mode in llm_policy.items():
+            if mode in {"force", "skip"}:
+                final_policy[stage] = mode
+        final_requirement["execution_policy"] = final_policy
+
         return final_requirement, questions
 
 
@@ -194,6 +204,7 @@ class OrchestratorAgent:
         if overrides:
             self._merge_overrides(context, overrides)
 
+        context = ImageAssessmentAgent().run(context)
         context = DecomposeAgent(self.registry).run(context)
         context = PlanningAgent().run(context)
 
@@ -238,6 +249,7 @@ class OrchestratorAgent:
                     overrides,
                 )
 
+            context = ImageAssessmentAgent().run(context)
             context = DecomposeAgent(
                 self.registry
             ).run(context)
@@ -317,6 +329,7 @@ class OrchestratorAgent:
                 overrides,
             )
 
+        context = ImageAssessmentAgent().run(context)
         context = DecomposeAgent(
             self.registry
         ).run(context)
