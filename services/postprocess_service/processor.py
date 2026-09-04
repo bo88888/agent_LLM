@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Tuple
 
 from services.postprocess_service.mysql_target_db import (
     query_mysql_evidence_for_detections,
+    query_mysql_situation_tracks,
     insert_mysql_prior_targets,
 )
 
@@ -554,7 +555,200 @@ def _select_best_mysql_matches(
             clusters.append([det])
 
     return clusters
+def run_situation_fusion(
+    fused_targets: List[Dict[str, Any]],
+    merge_threshold_km: float = DEFAULT_MERGE_THRESHOLD_KM,
+) -> List[Dict[str, Any]]:
+    """
+    将当前融合目标与MySQL态势轨迹进行空间关联。
 
+    规则：
+    1. 使用每个态势目标的最新轨迹点；
+    2. 在距离阈值内选择最近目标；
+    3. 检测目标和态势目标一对一匹配；
+    4. 返回匹配目标的完整历史轨迹；
+    5. 不输出类别一致性或类别冲突判读。
+    """
+    if not fused_targets:
+        return []
+
+    situation_tracks = query_mysql_situation_tracks()
+
+    if not situation_tracks:
+        print("[MySQL Situation] 未读取到态势轨迹，跳过态势融合")
+        return fused_targets
+
+    candidates = []
+
+    # 构建所有空间距离满足阈值的候选匹配
+    for detection_index, detection in enumerate(fused_targets):
+        try:
+            detection_lng = float(
+                detection.get("center_Lon")
+            )
+            detection_lat = float(
+                detection.get("center_Lat")
+            )
+        except (TypeError, ValueError):
+            continue
+
+        for track in situation_tracks:
+            try:
+                track_lng = float(track.get("lng"))
+                track_lat = float(track.get("lat"))
+            except (TypeError, ValueError):
+                continue
+
+            distance_km = calculate_distance(
+                detection_lng,
+                detection_lat,
+                track_lng,
+                track_lat,
+            )
+
+            if distance_km <= merge_threshold_km:
+                candidates.append(
+                    (
+                        distance_km,
+                        detection_index,
+                        track,
+                    )
+                )
+
+    # 只按照空间距离由近到远排序
+    candidates.sort(key=lambda item: item[0])
+
+    used_detection_indexes = set()
+    used_situation_ids = set()
+    assignments = {}
+
+    # 全局一对一最近匹配
+    for distance_km, detection_index, track in candidates:
+        situation_id = track.get("target_id")
+
+        if detection_index in used_detection_indexes:
+            continue
+
+        if situation_id in used_situation_ids:
+            continue
+
+        used_detection_indexes.add(detection_index)
+        used_situation_ids.add(situation_id)
+
+        assignments[detection_index] = (
+            distance_km,
+            track,
+        )
+
+    results = []
+
+    for detection_index, detection in enumerate(fused_targets):
+        result = dict(detection)
+
+        # 防止旧字段残留
+        result.pop("situationFusionJudgement", None)
+
+        assignment = assignments.get(detection_index)
+
+        if assignment is None:
+            results.append(result)
+            continue
+
+        distance_km, track = assignment
+        distance_m = distance_km * 1000.0
+
+        # 增加态势数据来源
+        source_text = str(
+            result.get("fusionSource", "")
+        )
+
+        sources = [
+            source.strip()
+            for source in source_text.split(",")
+            if source.strip()
+        ]
+
+        if "mysql_situation" not in sources:
+            sources.append("mysql_situation")
+
+        # 匹配到态势信息后属于多源信息融合
+        result["flag"] = 2
+
+        # 只保留用户需要的态势字段
+        result["matchedSituationInfo"] = {
+            "target_id": track.get("target_id"),
+            "target_type": track.get("target_type"),
+            "lng": track.get("lng"),
+            "lat": track.get("lat"),
+            "target_time": track.get("target_time"),
+            "distance_m": round(distance_m, 2),
+            "trajectory": track.get("trajectory", []),
+        }
+        
+
+        # 判断当前检测载荷类型
+        source_lower = ",".join(sources).lower()
+
+        if "optical" in source_lower:
+            payload_text = "光学"
+        elif "sar" in source_lower:
+            payload_text = "SAR"
+        else:
+            payload_text = "模型"
+
+        target_name = str(
+            result.get("targetName", "unknown")
+        )
+
+        try:
+            fused_confidence = float(
+                result.get("confidence", 0.0)
+            )
+        except (TypeError, ValueError):
+            fused_confidence = 0.0
+
+        track_count = len(
+            track.get("trajectory", [])
+        )
+
+        # 直接重写四个字段，不继续拼接原来的长文本
+        result["fusionSource"] = ",".join(sources)
+
+        result["fusionBasis"] = (
+            f"{payload_text}检测与MySQL先验采用DS证据融合，"
+            "态势轨迹采用经纬度最近邻一对一匹配"
+        )
+
+        result["fusionInfo"] = (
+            f"融合{payload_text}目标 {target_name}、"
+            f"MySQL先验和态势信息，"
+            f"置信度 {fused_confidence:.4f}"
+        )
+
+        result["auxInterpretationInfo"] = (
+            f"匹配态势目标 {track.get('target_id')}，"
+            f"类型 {track.get('target_type')}，"
+            f"距离 {distance_m:.2f}m，"
+            f"包含 {track_count} 个轨迹点"
+        )
+
+        print(
+            "[Situation Match] "
+            f"det_index={detection_index}, "
+            f"det_target={result.get('targetName')}, "
+            f"situation_id={track.get('target_id')}, "
+            f"situation_target={track.get('target_type')}, "
+            f"distance_m={distance_m:.2f}"
+        )
+
+        results.append(result)
+
+    print(
+        f"[MySQL Situation] 成功匹配 "
+        f"{len(assignments)} 个态势目标"
+    )
+
+    return results
 
 def run_qb_fusion(
     filtered_detections: List[dict],
@@ -626,6 +820,14 @@ def run_qb_fusion(
     # 5. 融合完成后，再把当前算法检测结果写入 MySQL
     # 注意：写入的是 algorithm_detections，不是 fused_targets
     # 这样 source 保存的是 optical_ship_service / sar_ship_service 等原始算法来源
+    # 5. 将DS融合结果与MySQL态势轨迹进行空间关联和一致性判读
+    fused_targets = run_situation_fusion(
+        fused_targets=fused_targets,
+        merge_threshold_km=merge_threshold_km,
+    )
+
+    # 6. 将当前算法检测结果写入MySQL先验库
+
     inserted_count = insert_mysql_prior_targets(
         detections=algorithm_detections,
         min_confidence=MIN_PRIOR_WRITE_CONFIDENCE,
@@ -636,6 +838,7 @@ def run_qb_fusion(
         print(f"[MySQL Prior] 本次新增 {inserted_count} 条目标先验记录")
 
     return fused_targets
+
 
 def _get_payload_type(det: Dict[str, Any]) -> str:
     payload_type = str(det.get("payloadType") or "").lower()
@@ -738,3 +941,102 @@ def build_final_report(
         "msg": f"任务执行成功。共发现 {len(fused_targets)} 个融合目标。",
         "data": fused_targets,
     }
+
+
+
+
+# cd /home/air/code_LLM/agent_LLM
+
+# docker exec -i agent_mysql sh -c \
+#   'exec mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' \
+#   < Situation_fusion.sql
+
+
+# 4. 验证内网数据库
+# docker exec agent_mysql mysql -uair -p123 agent -e "
+# SELECT
+#     COUNT(*) AS total_points,
+#     COUNT(DISTINCT target_id) AS total_targets
+# FROM target_situation_track;
+# "
+
+# 预期：
+
+# 50    5
+
+# 检查最新轨迹点：
+
+# docker exec agent_mysql mysql -uair -p123 agent -e "
+# SELECT
+#     t.target_id,
+#     t.target_type,
+#     t.lng,
+#     t.lat,
+#     t.target_time
+# FROM target_situation_track t
+# JOIN (
+#     SELECT target_id, MAX(target_time) AS latest_time
+#     FROM target_situation_track
+#     GROUP BY target_id
+# ) latest
+# ON t.target_id = latest.target_id
+# AND t.target_time = latest.latest_time
+# ORDER BY t.target_id;
+# "
+# 四、内网机配置并重启
+
+# 内网机的 MySQL 是同一 Compose 中的容器，因此 docker-compose.yml 应设置：
+
+# MYSQL_HOST: "mysql"
+# MYSQL_PORT: "3306"
+# MYSQL_USER: "air"
+# MYSQL_PASSWORD: "123"
+# MYSQL_DATABASE: "agent"
+
+# SITUATION_MATCH_RADIUS_KM: "0.1"
+# SITUATION_MAX_AGE_SECONDS: "2592000"
+# SITUATION_DEFAULT_CONFIDENCE: "0.90"
+
+# 重新创建应用容器：
+
+# cd /home/air/code_LLM/agent_LLM
+
+# docker-compose up -d --force-recreate app
+
+# 检查配置是否生效：
+
+# docker exec multi_payload_app env \
+#   | grep -E '^MYSQL_|^SITUATION_'
+
+# 检查服务端口：
+
+# docker port multi_payload_app 9000/tcp
+
+# 内网配置通常显示：
+
+# 0.0.0.0:9011
+
+
+# 五、运行任务验证自动关联
+
+# 使用内网机映射端口，例如 9011：
+
+# curl -X POST "http://127.0.0.1:9011/api/v1/task/submit" \
+#   -H "Content-Type: application/json" \
+#   -d '{
+#     "task_id": "TEST_SITUATION_001",
+#     "tiff_path": "http://host.docker.internal:8889/data/sample_packet/taiwansuao_harbor_OPT.tif",
+#     "requirement_xml_path": "http://host.docker.internal:8889/data/requirement.xml"
+#   }'
+
+# 查看日志：
+
+# docker logs --tail 200 -f multi_payload_app
+
+# 正常关联时应出现：
+
+# [Situation Match]
+
+# 最终结果中应包含：
+
+# "fusionSource": "optical_ship_service,mysql_prior,mysql_situation"

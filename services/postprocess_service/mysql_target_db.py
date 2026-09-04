@@ -148,6 +148,107 @@ def query_mysql_evidence_for_detections(
 
     return evidence
 
+def query_mysql_situation_tracks() -> List[Dict[str, Any]]:
+    """
+    查询全部态势轨迹，并按照 target_id 分组。
+
+    每个目标返回：
+    target_id、target_type、最新经纬度、最新时间和完整轨迹。
+    """
+    sql = """
+        SELECT
+            target_id,
+            target_type,
+            lng,
+            lat,
+            target_time
+        FROM target_situation_track
+        ORDER BY target_id, target_time
+    """
+
+    conn = None
+
+    try:
+        conn = pymysql.connect(**get_mysql_config())
+
+        with conn.cursor() as cursor:
+            cursor.execute(sql)
+            rows = cursor.fetchall()
+
+    except Exception as exc:
+        print(f"[MySQL Situation] 查询态势轨迹失败: {exc}")
+        return []
+
+    finally:
+        if conn is not None:
+            conn.close()
+
+    tracks: Dict[Any, Dict[str, Any]] = {}
+
+    for row in rows:
+        target_id = row.get("target_id")
+        target_type = row.get("target_type")
+
+        if target_id is None:
+            continue
+
+        try:
+            lng = float(row.get("lng"))
+            lat = float(row.get("lat"))
+        except (TypeError, ValueError):
+            continue
+
+        target_time = row.get("target_time")
+
+        if hasattr(target_time, "strftime"):
+            target_time_text = target_time.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        else:
+            target_time_text = str(target_time)
+
+        if target_id not in tracks:
+            tracks[target_id] = {
+                "target_id": target_id,
+                "target_type": str(target_type),
+                "trajectory": [],
+            }
+
+        tracks[target_id]["trajectory"].append(
+            {
+                "lng": lng,
+                "lat": lat,
+                "target_time": target_time_text,
+            }
+        )
+
+    result = []
+
+    for track in tracks.values():
+        track["trajectory"].sort(
+            key=lambda point: point["target_time"]
+        )
+
+        if not track["trajectory"]:
+            continue
+
+        latest_point = track["trajectory"][-1]
+
+        track["lng"] = latest_point["lng"]
+        track["lat"] = latest_point["lat"]
+        track["target_time"] = latest_point["target_time"]
+
+        result.append(track)
+
+    print(
+        f"[MySQL Situation] 已读取 "
+        f"{len(result)} 个态势目标，"
+        f"{sum(len(item['trajectory']) for item in result)} 个轨迹点"
+    )
+
+    return result
+
+
 
 def insert_mysql_prior_targets(
     detections: List[Dict[str, Any]],

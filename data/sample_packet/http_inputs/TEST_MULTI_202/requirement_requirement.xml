@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<requirement>
+    <task_type>multi_payload_detection</task_type>
+
+    <detection_mode>base_map</detection_mode>
+
+    <payload_types>
+        <!-- <type>SAR</type> -->
+        <type>OPTICAL</type>
+        <!-- <type>ELINT</type> -->
+    </payload_types>
+
+    <target_classes>
+        <!-- <class>plane</class> -->
+        <class>ship</class>
+        <!-- <class>vehicle</class> -->
+    </target_classes>
+    
+</requirement>
