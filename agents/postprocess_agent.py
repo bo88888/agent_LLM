@@ -8,11 +8,19 @@ class PostprocessAgent:
         # 1. 虚警剔除
         filtered_dets = run_false_alarm_filter(context.tool_results, region)
         # 2. 融合
-        fused_targets = run_qb_fusion(filtered_dets)
+        need_spatial_fusion = bool(
+            context.request.output_requirements.get("need_spatial_fusion", True)
+        )
+        fused_targets = (
+            run_qb_fusion(filtered_dets)
+            if need_spatial_fusion
+            else filtered_dets
+        )
 
         context.metadata["fused_targets"] = fused_targets
         context.metadata["postprocess_summary"] = {
             "filtered_detection_count": len(filtered_dets),
             "fused_target_count": len(fused_targets),
+            "spatial_fusion_executed": need_spatial_fusion,
         }
         return context
