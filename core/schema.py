@@ -24,6 +24,10 @@ class TaskRequest:
     # slice_size: str = "1k*1k"
     output_requirements: Dict[str, Any] = field(default_factory=dict)
 
+    # 每个阶段支持 auto / force / skip。
+    # auto 由 ImageAssessmentAgent 根据影像质量和任务约束决定。
+    execution_policy: Dict[str, str] = field(default_factory=dict)
+
 
 @dataclass
 class SubTask:
