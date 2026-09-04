@@ -34,6 +34,18 @@ class ReplanDecisionAgent:
                     reason=f"fallback tool {fallback_tool} is registered",
                 )
 
+        # 当前仓库没有注册第二套检测器；先做输入级降级：
+        # 校正/增强影像调用失败后改用原始 TIFF 再执行一次。
+        if (
+            task.stage == "detect"
+            and task.parameters.get("input_preference") != "raw"
+            and not task.parameters.get("input_fallback_used", False)
+        ):
+            return ReplanDecision(
+                action="degrade_input",
+                reason="检测服务重试失败，降级为原始影像输入",
+            )
+
         if task.optional:
             return ReplanDecision(
                 action="skip",
