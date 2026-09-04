@@ -8,7 +8,7 @@ import requests
 from osgeo import gdal, osr
 from urllib.parse import urlparse, unquote, quote
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -166,6 +166,10 @@ def get_base_map_corners(tiff_path: str) -> list:
  
     projection = dataset.GetProjection()
 
+    if not projection:
+        dataset = None
+        raise ValueError("输入TIFF缺少坐标参考系")
+
     if projection:
         source_srs = osr.SpatialReference()
         source_srs.ImportFromWkt(projection)
@@ -211,6 +215,8 @@ def get_base_map_corners(tiff_path: str) -> list:
     result = {}
 
     for name, (lon, lat) in geo_corners.items():
+        if not (-180 <= float(lon) <= 180 and -90 <= float(lat) <= 90):
+            raise ValueError("输入TIFF角点经纬度超出有效范围")
         result[f"{name}Lon"] = round(float(lon), 8)
         result[f"{name}Lat"] = round(float(lat), 8)
 
@@ -263,6 +269,8 @@ def build_registry() -> ToolRegistry:
 
 def build_orchestration_payload(context: ExecutionContext) -> Dict[str, Any]:
     return {
+        "imageAssessment": context.metadata.get("image_assessment", {}),
+        "stageDecisions": context.metadata.get("stage_decisions", {}),
         "plan": context.plan_rationale,
         "trace": context.execution_trace,
         "replan_events": context.replan_events,
@@ -283,6 +291,8 @@ class PipelineRequest(BaseModel):
     instruction: str = ""
     tiff_path: str
     requirement_xml_path: str
+    execution_policy: Dict[str, str] = Field(default_factory=dict)
+    need_spatial_fusion: bool = True
 
 # 接口一：原来的全域底图识别接口 
 @app.post("/api/v1/task/submit")
@@ -319,10 +329,9 @@ async def submit_task(req: PipelineRequest):
             local_tiff_path,
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"底图四角坐标读取失败：{exc}",
-        ) from exc
+        # 坐标异常应交给智能体决定是否执行几何校正，不在入口直接终止。
+        base_map_corners = []
+        print(f"[影像评估] 原始影像四角坐标暂不可用：{exc}")
 
 
 
@@ -339,7 +348,8 @@ async def submit_task(req: PipelineRequest):
         output_requirements={
             "format": "json",
             "need_confidence": True,
-            "need_suggestion": True
+            "need_suggestion": True,
+            "need_spatial_fusion": req.need_spatial_fusion,
         },
     )
     context = ExecutionContext(request=request)
@@ -351,6 +361,7 @@ async def submit_task(req: PipelineRequest):
         context,
         overrides={
             "detection_mode": "base_map",
+            "execution_policy": req.execution_policy,
             # "constraints": {"need_geo_correction": True}
         }
     )
@@ -387,7 +398,7 @@ async def submit_task(req: PipelineRequest):
         "time_cost_seconds": time_cost,    
         "data": localize_target_names(raw_report["data"]),
         "baseMapCorners": base_map_corners, 
-        # "orchestration": raw_report["orchestration"],
+        "orchestration": build_orchestration_payload(context),
         # "execution_status":raw_report["execution_status"]
     }
 
