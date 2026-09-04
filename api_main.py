@@ -8,7 +8,7 @@ import requests
 from osgeo import gdal, osr
 from urllib.parse import urlparse, unquote, quote
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any
 from pathlib import Path
 from datetime import datetime
@@ -263,6 +263,8 @@ def build_registry() -> ToolRegistry:
 
 def build_orchestration_payload(context: ExecutionContext) -> Dict[str, Any]:
     return {
+        "imageAssessment": context.metadata.get("image_assessment", {}),
+        "stageDecisions": context.metadata.get("stage_decisions", {}),
         "plan": context.plan_rationale,
         "trace": context.execution_trace,
         "replan_events": context.replan_events,
@@ -283,6 +285,8 @@ class PipelineRequest(BaseModel):
     instruction: str = ""
     tiff_path: str
     requirement_xml_path: str
+    execution_policy: Dict[str, str] = Field(default_factory=dict)
+    need_spatial_fusion: bool = True
 
 # 接口一：原来的全域底图识别接口 
 @app.post("/api/v1/task/submit")
@@ -319,10 +323,9 @@ async def submit_task(req: PipelineRequest):
             local_tiff_path,
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=400,
-            detail=f"底图四角坐标读取失败：{exc}",
-        ) from exc
+        # 地理信息缺失本身就是几何精校正的判别输入，不在入口直接终止任务。
+        base_map_corners = []
+        print(f"[影像评估] 原始影像四角坐标暂不可用：{exc}")
 
 
 
@@ -339,8 +342,10 @@ async def submit_task(req: PipelineRequest):
         output_requirements={
             "format": "json",
             "need_confidence": True,
-            "need_suggestion": True
+            "need_suggestion": True,
+            "need_spatial_fusion": req.need_spatial_fusion,
         },
+        execution_policy=req.execution_policy,
     )
     context = ExecutionContext(request=request)
 
@@ -387,7 +392,7 @@ async def submit_task(req: PipelineRequest):
         "time_cost_seconds": time_cost,    
         "data": localize_target_names(raw_report["data"]),
         "baseMapCorners": base_map_corners, 
-        # "orchestration": raw_report["orchestration"],
+        "orchestration": build_orchestration_payload(context),
         # "execution_status":raw_report["execution_status"]
     }
 
