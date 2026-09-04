@@ -3,6 +3,7 @@ from agents.decompose_agent import DecomposeAgent
 from agents.input_agent import InputAgent
 from agents.planning_agent import PlanningAgent
 from agents.understanding_agent import UnderstandingAgent
+from agents.adaptive_decision_agent import AdaptiveDecisionAgent
 from core.schema import ExecutionContext
 from agents.llm_understanding_agent import LLMUnderstandingAgent
 
@@ -194,6 +195,7 @@ class OrchestratorAgent:
         if overrides:
             self._merge_overrides(context, overrides)
 
+        context = AdaptiveDecisionAgent().run(context)
         context = DecomposeAgent(self.registry).run(context)
         context = PlanningAgent().run(context)
 
@@ -238,6 +240,7 @@ class OrchestratorAgent:
                     overrides,
                 )
 
+            context = AdaptiveDecisionAgent().run(context)
             context = DecomposeAgent(
                 self.registry
             ).run(context)
@@ -317,6 +320,7 @@ class OrchestratorAgent:
                 overrides,
             )
 
+        context = AdaptiveDecisionAgent().run(context)
         context = DecomposeAgent(
             self.registry
         ).run(context)
